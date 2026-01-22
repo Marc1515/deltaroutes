@@ -1,3 +1,5 @@
+// prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/prisma"
@@ -7,117 +9,9 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
-  id                   String         @id @default(cuid())
-  email                String         @unique
-  name                 String?
-  role                 UserRole       @default(STAFF)
-  isActive             Boolean        @default(true)
-  languages            LanguageCode[] @default([])
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @updatedAt
-  assignedReservations Reservation[]  @relation("GuideAssignments")
-
-  @@index([role, isActive])
-}
-
-model Customer {
-  id           String        @id @default(cuid())
-  name         String
-  email        String?       @unique
-  phone        String?
-  createdAt    DateTime      @default(now())
-  reservations Reservation[]
-
-  @@index([email])
-}
-
-model Experience {
-  id                 String         @id @default(cuid())
-  slug               String         @unique
-  title              String
-  description        String
-  type               ExperienceType
-  durationMin        Int
-  difficulty         String?
-  coverImage         String?
-  location           String?
-  isPublished        Boolean        @default(false)
-  supportedLanguages LanguageCode[] @default([])
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-  sessions           Session[]
-}
-
-model Session {
-  id                       String        @id @default(cuid())
-  experienceId             String
-  startAt                  DateTime
-  endAt                    DateTime?
-  meetingPoint             String
-  mapsUrl                  String?
-  maxSeatsTotal            Int
-  maxPerGuide              Int
-  bookingClosesAt          DateTime
-  priceCents               Int
-  currency                 String        @default("eur")
-  requiresPayment          Boolean       @default(true)
-  refundFullBeforeHours    Int           @default(48)
-  refundPartialBeforeHours Int           @default(24)
-  refundPartialPercent     Int           @default(50)
-  isCancelled              Boolean       @default(false)
-  createdAt                DateTime      @default(now())
-  updatedAt                DateTime      @updatedAt
-  reservations             Reservation[]
-  experience               Experience    @relation(fields: [experienceId], references: [id], onDelete: Cascade)
-
-  @@index([experienceId, startAt])
-  @@index([startAt, bookingClosesAt])
-}
-
-model Reservation {
-  id                String            @id @default(cuid())
-  sessionId         String
-  customerId        String
-  guideUserId       String?
-  status            ReservationStatus @default(HOLD)
-  holdExpiresAt     DateTime?
-  primaryLanguage   LanguageBase
-  preferredLanguage LanguageCode?
-  cancelledAt       DateTime?
-  cancelReason      CancelReason?
-  refundAmountCents Int               @default(0)
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
-  payment           Payment?
-  customer          Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  guideUser         User?             @relation("GuideAssignments", fields: [guideUserId], references: [id])
-  session           Session           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  @@unique([sessionId, customerId])
-  @@index([sessionId, status])
-  @@index([sessionId, guideUserId, status])
-  @@index([status, holdExpiresAt])
-  @@index([cancelReason, cancelledAt])
-}
-
-model Payment {
-  id                      String        @id @default(cuid())
-  reservationId           String        @unique
-  status                  PaymentStatus @default(REQUIRES_PAYMENT)
-  amountCents             Int
-  currency                String        @default("eur")
-  stripeCheckoutSessionId String?       @unique
-  stripePaymentIntentId   String?       @unique
-  stripeRefundId          String?       @unique
-  refundedAmountCents     Int           @default(0)
-  createdAt               DateTime      @default(now())
-  updatedAt               DateTime      @updatedAt
-  reservation             Reservation   @relation(fields: [reservationId], references: [id], onDelete: Cascade)
-
-  @@index([status])
-}
-
+// --------------------
+// Enums
+// --------------------
 enum ExperienceType {
   BIKE_TOUR
   KAYAK_TOUR
@@ -125,12 +19,20 @@ enum ExperienceType {
   MINI_CRUISE
 }
 
+/**
+ * Idiomas base que SIEMPRE ofreces como idioma principal del tour.
+ * El cliente elige UNO de estos como tourLanguage.
+ */
 enum LanguageBase {
   CA
   ES
   EN
 }
 
+/**
+ * Idiomas extendidos: puede haber guías que dominen algunos de estos.
+ * Se usarán en extraTourLanguages si el grupo lo necesita.
+ */
 enum LanguageCode {
   CA
   ES
@@ -147,11 +49,11 @@ enum UserRole {
 }
 
 enum ReservationStatus {
-  HOLD
-  CONFIRMED
-  WAITING
-  CANCELLED
-  EXPIRED
+  HOLD       // plaza retenida mientras paga (con expiración)
+  CONFIRMED  // pago OK, plaza confirmada
+  WAITING    // lista de espera (sin plaza)
+  CANCELLED  // cancelada
+  EXPIRED    // expiró (hold vencido / pasó cierre / waitlist expirada)
 }
 
 enum PaymentStatus {
@@ -168,4 +70,184 @@ enum CancelReason {
   CUSTOMER
   OPERATOR
   WEATHER
+}
+
+// --------------------
+// Users (empleados)
+// --------------------
+model User {
+  id       String   @id @default(cuid())
+  email    String   @unique
+  name     String?
+  role     UserRole @default(STAFF)
+  isActive Boolean  @default(true)
+
+  // Para guías: idiomas que domina
+  languages LanguageCode[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Reservas asignadas a este guía
+  assignedReservations Reservation[] @relation("GuideAssignments")
+
+  @@index([role, isActive])
+}
+
+// --------------------
+// Customers (clientes sin cuenta)
+// --------------------
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?  @unique // 👈 importante para poder hacer upsert por email
+  phone     String?
+  createdAt DateTime @default(now())
+
+  reservations Reservation[]
+
+  @@index([email])
+}
+
+// --------------------
+// Experiences (ficha pública)
+// --------------------
+model Experience {
+  id          String         @id @default(cuid())
+  slug        String         @unique
+  title       String
+  description String
+  type        ExperienceType
+
+  durationMin Int
+  difficulty  String?
+  coverImage  String?
+  location    String?
+  isPublished Boolean @default(false)
+
+  // Marketing / info (no garantiza disponibilidad real, pero ayuda a mostrar idiomas típicos)
+  supportedLanguages LanguageCode[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions Session[]
+}
+
+// --------------------
+// Sessions (salidas/turnos)
+// --------------------
+model Session {
+  id           String    @id @default(cuid())
+  experienceId String
+  startAt      DateTime
+  endAt        DateTime?
+  meetingPoint String
+  mapsUrl      String?
+
+  // Capacidad
+  maxSeatsTotal Int
+  maxPerGuide   Int
+
+  // Cierre de reservas: startAt - 4h
+  bookingClosesAt DateTime
+
+  // Precio (Stripe)
+  priceCents      Int
+  currency        String  @default("eur")
+  requiresPayment Boolean @default(true)
+
+  // Política de reembolso (por sesión) - por defecto 48h/24h/50%
+  refundFullBeforeHours    Int @default(48) // >= 48h => 100%
+  refundPartialBeforeHours Int @default(24) // >= 24h y < 48h => parcial
+  refundPartialPercent     Int @default(50) // parcial => 50%
+
+  isCancelled Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  experience   Experience    @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  reservations Reservation[]
+
+  @@index([experienceId, startAt])
+  @@index([startAt, bookingClosesAt])
+}
+
+// --------------------
+// Reservations
+// --------------------
+model Reservation {
+  id         String @id @default(cuid())
+  sessionId  String
+  customerId String
+
+  // Asignación a guía (User role=GUIDE)
+  guideUserId String?
+
+  status        ReservationStatus @default(HOLD)
+  holdExpiresAt DateTime? // si status=HOLD, caduca (ej. now + 15 min)
+
+  /**
+   * Idiomas del tour:
+   * - tourLanguage: idioma principal del tour (base CA/ES/EN) -> el cliente elige uno
+   * - extraTourLanguages: lista de idiomas adicionales si el grupo necesita que el guía repita en más idiomas
+   *
+   * Nota: no limitamos cantidad (tu decisión).
+   * La lógica de negocio decide si hay guías disponibles para cubrirlos.
+   */
+  tourLanguage      LanguageBase
+  extraTourLanguages LanguageCode[] @default([])
+
+  // Opcional: notas del cliente (ej. "somos 2 EN + 1 ES", etc.)
+  languageNotes String?
+
+  // Cancelación y métricas
+  cancelledAt       DateTime?
+  cancelReason      CancelReason?
+  refundAmountCents Int           @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customer  Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  guideUser User?    @relation("GuideAssignments", fields: [guideUserId], references: [id], onDelete: SetNull)
+
+  payment Payment?
+
+  // Evita doble reserva del mismo cliente en la misma sesión
+  @@unique([sessionId, customerId])
+
+  @@index([sessionId, status])
+  @@index([sessionId, guideUserId, status])
+  @@index([status, holdExpiresAt])
+  @@index([cancelReason, cancelledAt])
+}
+
+// --------------------
+// Payments (Stripe)
+// --------------------
+model Payment {
+  id            String @id @default(cuid())
+  reservationId String @unique
+
+  status      PaymentStatus @default(REQUIRES_PAYMENT)
+  amountCents Int
+  currency    String        @default("eur")
+
+  // Stripe refs (Checkout recomendado para MVP)
+  stripeCheckoutSessionId String? @unique
+  stripePaymentIntentId   String? @unique
+
+  // Refund tracking
+  stripeRefundId      String? @unique
+  refundedAmountCents Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([status])
 }
