@@ -3,55 +3,26 @@ import "dotenv/config";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
-  LanguageBase,
   LanguageCode,
   ReservationStatus,
   PaymentStatus,
 } from "@/generated/prisma";
+import { HOLD_MINUTES } from "@/config/app";
+import type { CreateReservationBody, CreateReservationResponse } from "@/types/reservations.types";
+
+
 
 /**
- * Body esperado en el POST /api/reservations
- *
- * - sessionId: la sesión concreta (fecha/hora) a reservar
- * - customerName/email/phone: datos del cliente (sin cuenta)
- * - tourLanguage: idioma principal del tour (el cliente elige 1) -> CA/ES/EN
- */
-type Body = {
-  sessionId: string;
-  customerName: string;
-  customerEmail: string; // 👈 obligatorio como acordaste
-  customerPhone?: string;
-  tourLanguage: LanguageBase; // CA | ES | EN
-};
-
-const HOLD_MINUTES = 15;
-
-/**
- * Convierte LanguageBase (CA/ES/EN) a LanguageCode (CA/ES/EN/DE/FR/IT).
- * Comparten valores, pero TS necesita conversión explícita.
- */
-function baseToCode(l: LanguageBase): LanguageCode {
-  return l as unknown as LanguageCode;
-}
-
-/**
- * Intenta detectar el idioma principal del navegador (Accept-Language)
- * y mapearlo a tu enum LanguageCode.
- *
- * Ejemplos de Accept-Language:
- * - "es-ES,es;q=0.9,en;q=0.8"
- * - "de-DE,de;q=0.9,en;q=0.8"
+ * Detecta idioma principal del navegador desde Accept-Language.
+ * Lo usamos SOLO como preferencia interna (no obliga el idioma del tour).
  */
 function detectBrowserLanguage(req: Request): LanguageCode | null {
   const header = req.headers.get("accept-language");
   if (!header) return null;
 
-  // Nos quedamos con el primer idioma “fuerte” antes de coma:
-  // "es-ES" de "es-ES,es;q=0.9,en;q=0.8"
   const first = header.split(",")[0]?.trim().toLowerCase();
   if (!first) return null;
 
-  // Normalizamos a código base: "es" de "es-es"
   const code = first.split("-")[0];
 
   switch (code) {
@@ -72,28 +43,34 @@ function detectBrowserLanguage(req: Request): LanguageCode | null {
   }
 }
 
-export async function POST(req: Request) {
-  const body = (await req.json()) as Body;
+/**
+ * Devuelve true si el idioma es uno de los 3 base.
+ * (Si detectamos CA/ES/EN en el navegador, no aporta nada para elegir guía,
+ * porque todos los guías dominan los 3 por contrato.)
+ */
+function isBaseLanguage(lng: LanguageCode) {
+  return lng === LanguageCode.CA || lng === LanguageCode.ES || lng === LanguageCode.EN;
+}
 
-  // Validación mínima
+export async function POST(req: Request) {
+  const body = (await req.json()) as CreateReservationBody;
+
   if (!body.sessionId || !body.customerName || !body.customerEmail || !body.tourLanguage) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
   const now = new Date();
 
-  // Detectamos idioma del navegador (solo para preselección/análisis/preferencia de guía)
+  // Idioma del navegador: solo para preferir guía “especial”
   const browserLanguage = detectBrowserLanguage(req);
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // 1) Traer sesión
       const session = await tx.session.findUniqueOrThrow({
         where: { id: body.sessionId },
-        include: { experience: true },
       });
 
-      // 2) Reglas de negocio
+      // reglas de negocio
       if (session.isCancelled) {
         return { ok: false as const, status: 400, error: "Session is cancelled" };
       }
@@ -102,14 +79,14 @@ export async function POST(req: Request) {
         return { ok: false as const, status: 400, error: "Booking is closed for this session" };
       }
 
-      // 3) Customer: email obligatorio -> upsert
+      // Customer: email obligatorio -> upsert
       const customer = await tx.customer.upsert({
         where: { email: body.customerEmail },
         update: { name: body.customerName, phone: body.customerPhone ?? undefined },
         create: { name: body.customerName, email: body.customerEmail, phone: body.customerPhone ?? null },
       });
 
-      // 4) Evitar doble reserva del mismo customer en la misma sesión
+      // evitar duplicado
       const existing = await tx.reservation.findUnique({
         where: { sessionId_customerId: { sessionId: session.id, customerId: customer.id } },
       });
@@ -118,7 +95,7 @@ export async function POST(req: Request) {
         return { ok: false as const, status: 409, error: "Customer already has a reservation for this session" };
       }
 
-      // 5) Contar plazas ocupadas (CONFIRMED + HOLD)
+      // plazas ocupadas globales
       const taken = await tx.reservation.count({
         where: {
           sessionId: session.id,
@@ -126,7 +103,6 @@ export async function POST(req: Request) {
         },
       });
 
-      // Si no hay plazas -> WAITING (sin guía asignado)
       if (taken >= session.maxSeatsTotal) {
         const waiting = await tx.reservation.create({
           data: {
@@ -134,29 +110,25 @@ export async function POST(req: Request) {
             customerId: customer.id,
             status: ReservationStatus.WAITING,
             tourLanguage: body.tourLanguage,
-            browserLanguage, // interno: puede ser null
+            browserLanguage, // interno (puede ser null)
           },
         });
 
         return { ok: true as const, kind: "WAITING" as const, reservationId: waiting.id };
       }
 
-      // 6) Asignación de guía
-      // Requisito: guía debe dominar el idioma del tour (tourLanguage)
-      const tourLanguageAsCode = baseToCode(body.tourLanguage);
-
-      // Candidatos: guías activos que dominen tourLanguage
+      /**
+       * Asignación de guía (refinada):
+       * - No comprobamos tourLanguage en guide.languages porque TODOS los guías dominan CA/ES/EN.
+       * - Solo usamos browserLanguage si es un idioma “extra” (DE/FR/IT...) para preferir guías especiales.
+       */
       const candidateGuides = await tx.user.findMany({
-        where: {
-          role: "GUIDE",
-          isActive: true,
-          languages: { has: tourLanguageAsCode },
-        },
+        where: { role: "GUIDE", isActive: true },
         select: { id: true, languages: true },
       });
 
       if (candidateGuides.length === 0) {
-        // No hay guías capaces de hacer el tour en ese idioma
+        // Sin guías -> WAITING (o podrías devolver error según negocio)
         const waiting = await tx.reservation.create({
           data: {
             sessionId: session.id,
@@ -170,17 +142,12 @@ export async function POST(req: Request) {
         return { ok: true as const, kind: "WAITING" as const, reservationId: waiting.id };
       }
 
-      // Queremos preferir guías que (además) dominen el idioma del navegador, si existe
-      // (pero sin que sea obligatorio)
+      // Si browserLanguage es base, no aporta nada; si es extra, intentamos preferir guía que lo tenga
       const preferredGuides =
-        browserLanguage
+        browserLanguage && !isBaseLanguage(browserLanguage)
           ? candidateGuides.filter((g) => g.languages.includes(browserLanguage))
           : [];
 
-      /**
-       * Dado un set de guías, devuelve el que tenga menos carga en esta sesión
-       * y no supere maxPerGuide. Si ninguno tiene hueco -> null.
-       */
       async function pickLeastLoaded(guideIds: string[]): Promise<string | null> {
         if (guideIds.length === 0) return null;
 
@@ -207,17 +174,14 @@ export async function POST(req: Request) {
         return chosen?.id ?? null;
       }
 
-      // 1º intento: guías que también dominen browserLanguage (si existe)
-      let guideUserId: string | null = null;
-      guideUserId = await pickLeastLoaded(preferredGuides.map((g) => g.id));
-
-      // 2º intento: cualquier guía que domine tourLanguage
+      // 1º: guía “especial” (si aplica) | 2º: cualquiera
+      let guideUserId: string | null = await pickLeastLoaded(preferredGuides.map((g) => g.id));
       if (!guideUserId) {
         guideUserId = await pickLeastLoaded(candidateGuides.map((g) => g.id));
       }
 
-      // Si no hay guía con hueco -> WAITING
       if (!guideUserId) {
+        // No hay guía con hueco -> WAITING
         const waiting = await tx.reservation.create({
           data: {
             sessionId: session.id,
@@ -231,7 +195,7 @@ export async function POST(req: Request) {
         return { ok: true as const, kind: "WAITING" as const, reservationId: waiting.id };
       }
 
-      // 7) Crear HOLD
+      // HOLD
       const holdExpiresAt = new Date(now.getTime() + HOLD_MINUTES * 60 * 1000);
 
       const reservation = await tx.reservation.create({
@@ -246,7 +210,7 @@ export async function POST(req: Request) {
         },
       });
 
-      // 8) Payment placeholder (Stripe vendrá luego)
+      // Payment placeholder
       if (session.requiresPayment) {
         await tx.payment.create({
           data: {
@@ -267,23 +231,17 @@ export async function POST(req: Request) {
         });
       }
 
-      return {
-        ok: true as const,
-        kind: "HOLD" as const,
-        reservationId: reservation.id,
-        holdExpiresAt,
-      };
+      return { ok: true as const, kind: "HOLD" as const, reservationId: reservation.id, holdExpiresAt };
     });
 
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
-    return NextResponse.json(result);
+    return NextResponse.json(result as CreateReservationResponse);
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Unknown error";
 
-    // findUniqueOrThrow lanza algo tipo: "No Session found..."
     if (message.includes("No Session found")) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
