@@ -19,20 +19,14 @@ enum ExperienceType {
   MINI_CRUISE
 }
 
-/**
- * Idiomas base que SIEMPRE ofreces como idioma principal del tour.
- * El cliente elige UNO de estos como tourLanguage.
- */
+// Idiomas base garantizados como idioma principal del tour (el cliente elige 1)
 enum LanguageBase {
   CA
   ES
   EN
 }
 
-/**
- * Idiomas extendidos: puede haber guías que dominen algunos de estos.
- * Se usarán en extraTourLanguages si el grupo lo necesita.
- */
+// Idiomas ampliados (para guías y para browserLanguage detectado)
 enum LanguageCode {
   CA
   ES
@@ -100,7 +94,7 @@ model User {
 model Customer {
   id        String   @id @default(cuid())
   name      String
-  email     String?  @unique // 👈 importante para poder hacer upsert por email
+  email     String?  @unique // recomendado para upsert por email
   phone     String?
   createdAt DateTime @default(now())
 
@@ -125,7 +119,7 @@ model Experience {
   location    String?
   isPublished Boolean @default(false)
 
-  // Marketing / info (no garantiza disponibilidad real, pero ayuda a mostrar idiomas típicos)
+  // Marketing / info (no garantiza disponibilidad real, pero útil para mostrar)
   supportedLanguages LanguageCode[] @default([])
 
   createdAt DateTime @default(now())
@@ -188,19 +182,11 @@ model Reservation {
   status        ReservationStatus @default(HOLD)
   holdExpiresAt DateTime? // si status=HOLD, caduca (ej. now + 15 min)
 
-  /**
-   * Idiomas del tour:
-   * - tourLanguage: idioma principal del tour (base CA/ES/EN) -> el cliente elige uno
-   * - extraTourLanguages: lista de idiomas adicionales si el grupo necesita que el guía repita en más idiomas
-   *
-   * Nota: no limitamos cantidad (tu decisión).
-   * La lógica de negocio decide si hay guías disponibles para cubrirlos.
-   */
-  tourLanguage      LanguageBase
-  extraTourLanguages LanguageCode[] @default([])
+  // ✅ Lo único que el cliente elige (idioma del tour)
+  tourLanguage LanguageBase
 
-  // Opcional: notas del cliente (ej. "somos 2 EN + 1 ES", etc.)
-  languageNotes String?
+  // ✅ Interno: idioma detectado del navegador (sirve para preselección/analítica/asignación preferente)
+  browserLanguage LanguageCode?
 
   // Cancelación y métricas
   cancelledAt       DateTime?
