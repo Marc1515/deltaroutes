@@ -1,41 +1,46 @@
 import "dotenv/config";
 import { prisma } from "../../src/lib/prisma";
-import { ReservationStatus } from "../../src/generated/prisma";
+
+const madridFormatter = new Intl.DateTimeFormat("es-ES", {
+    timeZone: "Europe/Madrid",
+    dateStyle: "short",
+    timeStyle: "short",
+});
+
 
 async function main() {
     const reservations = await prisma.reservation.findMany({
-        take: 50,
         orderBy: { createdAt: "desc" },
+        take: 20,
         include: {
             customer: { select: { name: true, email: true } },
             session: { select: { startAt: true } },
-            guideUser: { select: { name: true, email: true } },
+            guideUser: { select: { email: true } },
             payment: { select: { status: true, amountCents: true, currency: true } },
         },
     });
 
-    console.table(
-        reservations.map((r) => ({
-            id: r.id,
-            status: r.status,
-            tourLanguage: r.tourLanguage,
-            browserLanguage: r.browserLanguage ?? "",
-            startAt: r.session.startAt.toISOString(),
-            customer: r.customer.email ?? r.customer.name,
-            guide: r.guideUser?.email ?? "",
-            paymentStatus: r.payment?.status ?? "",
-            amountCents: r.payment?.amountCents ?? "",
-            currency: r.payment?.currency ?? "",
-            holdExpiresAt: r.holdExpiresAt ? r.holdExpiresAt.toISOString() : "",
-            createdAt: r.createdAt.toISOString(),
-        }))
-    );
+    console.log("reservations found:", reservations.length);
 
-    const holds = await prisma.reservation.count({ where: { status: ReservationStatus.HOLD } });
-    const waiting = await prisma.reservation.count({ where: { status: ReservationStatus.WAITING } });
-    const confirmed = await prisma.reservation.count({ where: { status: ReservationStatus.CONFIRMED } });
+    const mapped = reservations.map((r) => ({
+        id: r.id,
+        status: r.status,
+        tourLanguage: r.tourLanguage,
+        browserLanguage: r.browserLanguage ?? null,
+        customerEmail: r.customer.email ?? null,
+        guideEmail: r.guideUser?.email ?? null,
+        paymentStatus: r.payment?.status ?? null,
+        amountCents: r.payment?.amountCents ?? null,
+        currency: r.payment?.currency ?? null,
+        holdExpiresAtUtc: r.holdExpiresAt ? r.holdExpiresAt.toISOString() : null,
+        holdExpiresAtLocal: r.holdExpiresAt ? madridFormatter.format(r.holdExpiresAt) : null,
+        createdAtUtc: r.createdAt.toISOString(),
+        createdAtLocal: madridFormatter.format(r.createdAt),
 
-    console.log({ holds, waiting, confirmed });
+        sessionStartAt: r.session.startAt.toISOString(),
+    }));
+
+    console.log(JSON.stringify(mapped, null, 2));
 }
 
 main()
@@ -43,6 +48,4 @@ main()
         console.error(e);
         process.exit(1);
     })
-    .finally(async () => {
-        await prisma.$disconnect();
-    });
+    .finally(async () => prisma.$disconnect());
