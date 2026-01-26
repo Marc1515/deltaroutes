@@ -11,6 +11,12 @@ import { HOLD_MINUTES } from "@/config/app";
 import type { CreateReservationBody, CreateReservationResponse } from "@/types/reservations.types";
 
 
+const madridFormatter = new Intl.DateTimeFormat("es-ES", {
+  timeZone: "Europe/Madrid",
+  dateStyle: "short",
+  timeStyle: "short",
+});
+
 
 /**
  * Detecta idioma principal del navegador desde Accept-Language.
@@ -231,7 +237,7 @@ export async function POST(req: Request) {
         });
       }
 
-      return { ok: true as const, kind: "HOLD" as const, reservationId: reservation.id, holdExpiresAt };
+      return { ok: true as const, kind: "HOLD" as const, reservationId: reservation.id, holdExpiresAt: madridFormatter.format(holdExpiresAt) };
     });
 
     if (!result.ok) {
