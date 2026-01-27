@@ -221,7 +221,7 @@ export async function POST(req: Request) {
         await tx.payment.create({
           data: {
             reservationId: reservation.id,
-            status: PaymentStatus.PENDING,
+            status: PaymentStatus.REQUIRES_PAYMENT,
             amountCents: session.priceCents,
             currency: session.currency,
           },
