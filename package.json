@@ -6,7 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:counts": "tsx scripts/db/counts.ts",
+    "db:list-reservations": "tsx scripts/db/list-reservations.ts",
+    "db:list-sessions": "tsx scripts/db/list-sessions.ts",
+    "db:pick-session": "tsx scripts/db/pick-session.ts",
+    "db:show-session": "tsx scripts/db/show-session.ts",
+    "db:cleanup-holds": "tsx scripts/db/cleanup-holds.ts",
+    "db:force-expire-holds": "tsx scripts/db/force-expire-holds.ts"
   },
   "dependencies": {
     "@prisma/client": "^7.2.0",
