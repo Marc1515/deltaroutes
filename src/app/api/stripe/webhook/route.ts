@@ -51,6 +51,11 @@ export async function POST(req: Request) {
     const paymentIntentId =
         typeof session.payment_intent === "string" ? session.payment_intent : undefined;
 
+    if (process.env.NODE_ENV !== "production") {
+        await new Promise((r) => setTimeout(r, 10_000));
+    }
+
+
     try {
         await prisma.$transaction(async (tx) => {
             // Traemos la reserva + payment para validar y hacer idempotente
