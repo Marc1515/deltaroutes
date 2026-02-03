@@ -180,7 +180,7 @@ model Reservation {
   guideUserId String?
 
   status        ReservationStatus @default(HOLD)
-  holdExpiresAt DateTime? // si status=HOLD, caduca (ej. now + 15 min)
+  holdExpiresAt DateTime? // si status=HOLD, caduca (ej. now + 30 min)
 
   // ✅ Lo único que el cliente elige (idioma del tour)
   tourLanguage LanguageBase
