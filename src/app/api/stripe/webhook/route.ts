@@ -1,14 +1,30 @@
-import "dotenv/config";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
-import { PaymentStatus, ReservationStatus } from "@/generated/prisma";
+import { ReservationStatus, PaymentStatus } from "@/generated/prisma";
 
-// Stripe SDK necesita runtime Node (no Edge)
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+function isCheckoutSession(obj: Stripe.Event.Data.Object): obj is Stripe.Checkout.Session {
+    return (obj as Stripe.Checkout.Session).object === "checkout.session";
+}
+
+function getMetadataValue(session: Stripe.Checkout.Session, key: string): string | null {
+    const meta = session.metadata;
+    if (!meta) return null;
+    const value = meta[key];
+    return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function getPaymentIntentId(session: Stripe.Checkout.Session): string | null {
+    const pi = session.payment_intent;
+    if (!pi) return null;
+    if (typeof pi === "string") return pi;
+    return pi.id ?? null;
+}
+
+export async function POST(req: NextRequest) {
     const sig = req.headers.get("stripe-signature");
     if (!sig) {
         return NextResponse.json({ error: "Missing stripe-signature" }, { status: 400 });
@@ -21,113 +37,168 @@ export async function POST(req: Request) {
         event = stripe.webhooks.constructEvent(
             rawBody,
             sig,
-            process.env.STRIPE_WEBHOOK_SECRET!
-        );
-    } catch (err) {
+            process.env.STRIPE_WEBHOOK_SECRET as string
+        ) as Stripe.Event;
+    } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Invalid signature";
         return NextResponse.json({ error: msg }, { status: 400 });
     }
 
-    // Solo manejamos este evento por ahora
-    if (event.type !== "checkout.session.completed") {
-        return NextResponse.json({ received: true });
-    }
-
-    const session = event.data.object as Stripe.Checkout.Session;
-
-    // ✅ check 1: realmente pagado
-    if (session.payment_status !== "paid") {
-        // Stripe a veces manda completed pero no paid en ciertos flujos;
-        // para tu caso (payment) queremos paid.
-        return NextResponse.json({ received: true, ignored: "not_paid" });
-    }
-
-    const reservationId = session.metadata?.reservationId;
-    if (!reservationId) {
-        return NextResponse.json({ error: "Missing metadata reservationId" }, { status: 400 });
-    }
-
-    const checkoutSessionId = session.id;
-    const paymentIntentId =
-        typeof session.payment_intent === "string" ? session.payment_intent : undefined;
-
-    if (process.env.NODE_ENV !== "production") {
-        await new Promise((r) => setTimeout(r, 10_000));
-    }
-
-
     try {
-        await prisma.$transaction(async (tx) => {
-            // Traemos la reserva + payment para validar y hacer idempotente
-            const reservation = await tx.reservation.findUnique({
-                where: { id: reservationId },
-                include: { payment: true },
-            });
+        switch (event.type) {
+            case "checkout.session.completed": {
+                const dataObj = event.data.object;
 
-            if (!reservation || !reservation.payment) {
-                // Si esto pasa, es un bug de lógica (no debería existir checkout sin payment)
-                throw new Error("Reservation or payment not found for reservationId");
+                if (!isCheckoutSession(dataObj)) {
+                    return NextResponse.json({ ok: true, ignored: "not_checkout_session" });
+                }
+
+                const session = dataObj;
+
+                // Confirmamos SOLO si está pagado
+                if (session.payment_status !== "paid") {
+                    return NextResponse.json({ ok: true, ignored: "not_paid" });
+                }
+
+                const reservationId = getMetadataValue(session, "reservationId");
+                if (!reservationId) {
+                    return NextResponse.json(
+                        { error: "Missing reservationId in metadata" },
+                        { status: 400 }
+                    );
+                }
+
+                const reservation = await prisma.reservation.findUnique({
+                    where: { id: reservationId },
+                    include: { payment: true },
+                });
+
+                if (!reservation || !reservation.payment) {
+                    return NextResponse.json({ error: "Reservation/payment not found" }, { status: 404 });
+                }
+
+                const payment = reservation.payment;
+
+                // Idempotencia
+                if (
+                    reservation.status === ReservationStatus.CONFIRMED &&
+                    payment.status === PaymentStatus.SUCCEEDED
+                ) {
+                    return NextResponse.json({ ok: true, alreadyConfirmed: true });
+                }
+
+                // No revivir reservas (solo confirmamos si estaba en HOLD)
+                if (reservation.status !== ReservationStatus.HOLD) {
+                    return NextResponse.json({ ok: true, ignored: "reservation_not_hold" });
+                }
+
+                // amount_total puede ser null
+                if (session.amount_total == null) {
+                    throw new Error("Stripe session.amount_total is null");
+                }
+
+                // currency puede ser null
+                if (!session.currency) {
+                    throw new Error("Stripe session.currency is null");
+                }
+
+                const stripeAmount = session.amount_total;
+                const stripeCurrency = session.currency.toLowerCase();
+
+                // Validación fuerte: importe y moneda deben coincidir con DB
+                if (
+                    stripeAmount !== payment.amountCents ||
+                    stripeCurrency !== payment.currency.toLowerCase()
+                ) {
+                    throw new Error("Amount/currency mismatch");
+                }
+
+                const paymentIntentId = getPaymentIntentId(session);
+
+                await prisma.$transaction(async (tx) => {
+                    await tx.payment.update({
+                        where: { id: payment.id },
+                        data: {
+                            status: PaymentStatus.SUCCEEDED,
+                            stripeCheckoutSessionId: session.id,
+                            stripePaymentIntentId: paymentIntentId,
+                        },
+                    });
+
+                    await tx.reservation.update({
+                        where: { id: reservation.id },
+                        data: {
+                            status: ReservationStatus.CONFIRMED,
+                            holdExpiresAt: null,
+                        },
+                    });
+                });
+
+                return NextResponse.json({ ok: true });
             }
 
-            // ✅ idempotencia: si ya está confirmado y cobrado, no hacemos nada
-            if (
-                reservation.status === ReservationStatus.CONFIRMED &&
-                reservation.payment.status === PaymentStatus.SUCCEEDED
-            ) {
-                return;
+            case "checkout.session.expired": {
+                const dataObj = event.data.object;
+
+                if (!isCheckoutSession(dataObj)) {
+                    return NextResponse.json({ ok: true, ignored: "not_checkout_session" });
+                }
+
+                const session = dataObj;
+
+                const reservationId = getMetadataValue(session, "reservationId");
+
+                const reservation = reservationId
+                    ? await prisma.reservation.findUnique({
+                        where: { id: reservationId },
+                        include: { payment: true },
+                    })
+                    : await prisma.reservation.findFirst({
+                        where: { payment: { stripeCheckoutSessionId: session.id } },
+                        include: { payment: true },
+                    });
+
+                if (!reservation || !reservation.payment) {
+                    return NextResponse.json({ ok: true, ignored: "not_found" });
+                }
+
+                const payment = reservation.payment;
+
+                // Si ya está confirmado y pagado, ignoramos
+                if (
+                    reservation.status === ReservationStatus.CONFIRMED &&
+                    payment.status === PaymentStatus.SUCCEEDED
+                ) {
+                    return NextResponse.json({ ok: true, alreadyPaid: true });
+                }
+
+                // Solo expiramos si estaba en HOLD
+                if (reservation.status === ReservationStatus.HOLD) {
+                    await prisma.$transaction(async (tx) => {
+                        await tx.reservation.update({
+                            where: { id: reservation.id },
+                            data: {
+                                status: ReservationStatus.EXPIRED,
+                                holdExpiresAt: null,
+                            },
+                        });
+
+                        await tx.payment.update({
+                            where: { id: payment.id },
+                            data: { status: PaymentStatus.CANCELED },
+                        });
+                    });
+                }
+
+                return NextResponse.json({ ok: true });
             }
 
-            // ✅ check 2: no confirmamos si ya expiró/canceló (evita “revivir” reservas)
-            if (reservation.status !== ReservationStatus.HOLD) {
-                // ejemplo: EXPIRED / CANCELLED / WAITING...
-                return;
-            }
-
-            // ✅ check 3: validar importe y moneda (muy recomendado)
-            // Nota: Stripe manda currency en minúsculas normalmente
-            const stripeAmount = session.amount_total ?? null;
-            const stripeCurrency = session.currency ?? null;
-
-            if (stripeAmount === null || stripeCurrency === null) {
-                throw new Error("Stripe session missing amount_total or currency");
-            }
-
-            if (stripeAmount !== reservation.payment.amountCents) {
-                throw new Error(
-                    `Amount mismatch: stripe=${stripeAmount} db=${reservation.payment.amountCents}`
-                );
-            }
-
-            if (stripeCurrency.toLowerCase() !== reservation.payment.currency.toLowerCase()) {
-                throw new Error(
-                    `Currency mismatch: stripe=${stripeCurrency} db=${reservation.payment.currency}`
-                );
-            }
-
-            // 1) marcar payment como SUCCEEDED + guardar ids Stripe
-            await tx.payment.update({
-                where: { id: reservation.payment.id },
-                data: {
-                    status: PaymentStatus.SUCCEEDED,
-                    stripeCheckoutSessionId: checkoutSessionId,
-                    stripePaymentIntentId: paymentIntentId ?? undefined,
-                },
-            });
-
-            // 2) confirmar reserva (y limpiar hold)
-            await tx.reservation.update({
-                where: { id: reservationId },
-                data: {
-                    status: ReservationStatus.CONFIRMED,
-                    holdExpiresAt: null,
-                },
-            });
-        });
-
-        return NextResponse.json({ received: true });
-    } catch (e: unknown) {
-        // Importante: si devuelves 500 Stripe reintentará => bien para resiliencia
-        const message = e instanceof Error ? e.message : "Unknown error";
-        return NextResponse.json({ received: false, error: message }, { status: 500 });
+            default:
+                return NextResponse.json({ ok: true, ignored: event.type });
+        }
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Webhook error";
+        // 500 => Stripe reintenta (bien para fallos transitorios)
+        return NextResponse.json({ ok: false, error: msg }, { status: 500 });
     }
 }
