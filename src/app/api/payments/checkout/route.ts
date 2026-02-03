@@ -81,11 +81,22 @@ export async function POST(req: Request) {
     // - usando payment.id suele ser suficiente, porque solo queremos 1 checkout activo por payment
     const idempotencyKey = `checkout_${reservation.payment.id}`;
 
+    // Stripe requiere que expires_at esté entre 30 min y 24 h desde "ahora".
+    // Si el hold restante es < 30 min, NO podemos usar expires_at sin que Stripe falle.
+    // En ese caso, lo dejamos undefined y dependeremos de tu cleanup/webhook.
+    const expiresAtSeconds =
+        reservation.holdExpiresAt && reservation.holdExpiresAt.getTime() - now.getTime() >= 30 * 60 * 1000
+            ? Math.floor(reservation.holdExpiresAt.getTime() / 1000)
+            : undefined;
+
+
     const session = await stripe.checkout.sessions.create(
         {
             mode: "payment",
 
-            // OJO: si customer.email es null, simplemente no lo mandamos
+            // 👇 AÑADIR ESTO
+            expires_at: expiresAtSeconds,
+
             customer_email: reservation.customer.email ?? undefined,
 
             line_items: [
@@ -109,6 +120,7 @@ export async function POST(req: Request) {
         },
         { idempotencyKey }
     );
+
 
     // 5) Persistir refs Stripe en tu Payment
     await prisma.payment.update({
