@@ -9,7 +9,9 @@ import {
 } from "@/generated/prisma";
 import { HOLD_MINUTES } from "@/config/app";
 import type { CreateReservationBody, CreateReservationResponse } from "@/types/reservations.types";
-
+import { sendEmail } from "@/lib/email";
+import ReservationCreatedHoldEmail from "@/emails/ReservationCreatedHoldEmail";
+import ReservationWaitingEmail from "@/emails/ReservationWaitingEmail";
 
 const madridFormatter = new Intl.DateTimeFormat("es-ES", {
   timeZone: "Europe/Madrid",
@@ -202,7 +204,8 @@ export async function POST(req: Request) {
       }
 
       // HOLD
-      const holdExpiresAt = new Date(now.getTime() + HOLD_MINUTES * 60 * 1000);
+      const holdExpiresAt = new Date(now.getTime() + (HOLD_MINUTES + 1) * 60 * 1000);
+
 
       const reservation = await tx.reservation.create({
         data: {
@@ -244,7 +247,66 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
+    // =========================
+    // EMAIL (best-effort)
+    // =========================
+    try {
+      const fullReservation = await prisma.reservation.findUnique({
+        where: { id: result.reservationId },
+        include: { customer: true, session: true },
+      });
+
+      if (fullReservation) {
+        const toEmail = fullReservation.customer.email;
+
+        // Si no hay email (null), simplemente no enviamos nada (pero NO salimos del endpoint)
+        if (toEmail) {
+          const appUrl = process.env.APP_URL ?? "http://localhost:3000";
+          const reservationCode = fullReservation.id.slice(0, 8).toUpperCase();
+
+          const activityLabel = `Sesión ${fullReservation.sessionId.slice(0, 8).toUpperCase()}`;
+          const languageLabel = fullReservation.tourLanguage;
+          const startText = madridFormatter.format(fullReservation.session.bookingClosesAt);
+
+          if (result.kind === "HOLD") {
+            const payUrl = `${appUrl}/checkout/start?reservationId=${fullReservation.id}`;
+
+            await sendEmail({
+              to: toEmail,
+              subject: `DeltaRoutes · Reserva iniciada (${reservationCode})`,
+              react: ReservationCreatedHoldEmail({
+                customerName: fullReservation.customer.name ?? "Cliente",
+                activityLabel,
+                startText,
+                languageLabel,
+                payUrl,
+                holdMinutes: HOLD_MINUTES,
+                reservationCode,
+              }),
+            });
+          } else if (result.kind === "WAITING") {
+            await sendEmail({
+              to: toEmail,
+              subject: `DeltaRoutes · Lista de espera (${reservationCode})`,
+              react: ReservationWaitingEmail({
+                customerName: fullReservation.customer.name ?? "Cliente",
+                activityLabel,
+                startText,
+                languageLabel,
+                reservationCode,
+              }),
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Reservation email failed:", e);
+    }
+
+
+    // Respuesta normal
     return NextResponse.json(result as CreateReservationResponse);
+
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Unknown error";
 

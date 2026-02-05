@@ -3,8 +3,16 @@ import Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { ReservationStatus, PaymentStatus } from "@/generated/prisma";
+import { sendEmail } from "@/lib/email";
+import PaymentConfirmedEmail from "@/emails/PaymentConfirmedEmail";
 
 export const runtime = "nodejs";
+
+const madridFormatter = new Intl.DateTimeFormat("es-ES", {
+    timeZone: "Europe/Madrid",
+    dateStyle: "short",
+    timeStyle: "short",
+});
 
 function isCheckoutSession(obj: Stripe.Event.Data.Object): obj is Stripe.Checkout.Session {
     return (obj as Stripe.Checkout.Session).object === "checkout.session";
@@ -44,6 +52,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: msg }, { status: 400 });
     }
 
+    console.log("[stripe-webhook] received:", event.type);
+
     try {
         switch (event.type) {
             case "checkout.session.completed": {
@@ -55,49 +65,54 @@ export async function POST(req: NextRequest) {
 
                 const session = dataObj;
 
-                // Confirmamos SOLO si está pagado
+                console.log("[stripe-webhook] completed:", {
+                    id: session.id,
+                    payment_status: session.payment_status,
+                    amount_total: session.amount_total,
+                    currency: session.currency,
+                    metadata: session.metadata,
+                });
+
                 if (session.payment_status !== "paid") {
                     return NextResponse.json({ ok: true, ignored: "not_paid" });
                 }
 
+                // 1) Intentamos por metadata (ideal)
                 const reservationId = getMetadataValue(session, "reservationId");
-                if (!reservationId) {
-                    return NextResponse.json(
-                        { error: "Missing reservationId in metadata" },
-                        { status: 400 }
-                    );
-                }
 
-                const reservation = await prisma.reservation.findUnique({
-                    where: { id: reservationId },
-                    include: { payment: true },
-                });
+                // 2) Fallback por stripeCheckoutSessionId (por si metadata faltase)
+                const reservation = reservationId
+                    ? await prisma.reservation.findUnique({
+                        where: { id: reservationId },
+                        include: { payment: true, customer: true, session: true },
+                    })
+                    : await prisma.reservation.findFirst({
+                        where: { payment: { stripeCheckoutSessionId: session.id } },
+                        include: { payment: true, customer: true, session: true },
+                    });
 
                 if (!reservation || !reservation.payment) {
-                    return NextResponse.json({ error: "Reservation/payment not found" }, { status: 404 });
+                    return NextResponse.json(
+                        { error: "Reservation/payment not found", reservationId, sessionId: session.id },
+                        { status: 404 }
+                    );
                 }
 
                 const payment = reservation.payment;
 
                 // Idempotencia
-                if (
-                    reservation.status === ReservationStatus.CONFIRMED &&
-                    payment.status === PaymentStatus.SUCCEEDED
-                ) {
+                if (reservation.status === ReservationStatus.CONFIRMED && payment.status === PaymentStatus.SUCCEEDED) {
                     return NextResponse.json({ ok: true, alreadyConfirmed: true });
                 }
 
-                // No revivir reservas (solo confirmamos si estaba en HOLD)
+                // No revivir reservas
                 if (reservation.status !== ReservationStatus.HOLD) {
-                    return NextResponse.json({ ok: true, ignored: "reservation_not_hold" });
+                    return NextResponse.json({ ok: true, ignored: "reservation_not_hold", status: reservation.status });
                 }
 
-                // amount_total puede ser null
                 if (session.amount_total == null) {
                     throw new Error("Stripe session.amount_total is null");
                 }
-
-                // currency puede ser null
                 if (!session.currency) {
                     throw new Error("Stripe session.currency is null");
                 }
@@ -105,12 +120,11 @@ export async function POST(req: NextRequest) {
                 const stripeAmount = session.amount_total;
                 const stripeCurrency = session.currency.toLowerCase();
 
-                // Validación fuerte: importe y moneda deben coincidir con DB
-                if (
-                    stripeAmount !== payment.amountCents ||
-                    stripeCurrency !== payment.currency.toLowerCase()
-                ) {
-                    throw new Error("Amount/currency mismatch");
+                // Validación fuerte (mantengo tu regla)
+                if (stripeAmount !== payment.amountCents || stripeCurrency !== payment.currency.toLowerCase()) {
+                    throw new Error(
+                        `Amount/currency mismatch. stripe=${stripeAmount} ${stripeCurrency} db=${payment.amountCents} ${payment.currency}`
+                    );
                 }
 
                 const paymentIntentId = getPaymentIntentId(session);
@@ -133,6 +147,35 @@ export async function POST(req: NextRequest) {
                         },
                     });
                 });
+
+                console.log("[stripe-webhook] CONFIRMED:", reservation.id);
+
+                // Email (NO bloquear webhook)
+                try {
+                    const toEmail = reservation.customer?.email;
+                    if (toEmail) {
+                        const reservationCode = reservation.id.slice(0, 8).toUpperCase();
+                        const activityLabel = `Sesión ${reservation.sessionId.slice(0, 8).toUpperCase()}`;
+                        const startText = madridFormatter.format(reservation.session.bookingClosesAt);
+                        const languageLabel = reservation.tourLanguage;
+                        const amountText = `${(payment.amountCents / 100).toFixed(2)} ${payment.currency.toUpperCase()}`;
+
+                        sendEmail({
+                            to: toEmail,
+                            subject: `DeltaRoutes · Reserva confirmada (${reservationCode})`,
+                            react: PaymentConfirmedEmail({
+                                customerName: reservation.customer?.name ?? "Cliente",
+                                activityLabel,
+                                startText,
+                                languageLabel,
+                                reservationCode,
+                                amountText,
+                            }),
+                        }).catch((e) => console.warn("Payment confirmation email failed:", e));
+                    }
+                } catch (e) {
+                    console.warn("Payment confirmation email preparation failed:", e);
+                }
 
                 return NextResponse.json({ ok: true });
             }
@@ -164,23 +207,15 @@ export async function POST(req: NextRequest) {
 
                 const payment = reservation.payment;
 
-                // Si ya está confirmado y pagado, ignoramos
-                if (
-                    reservation.status === ReservationStatus.CONFIRMED &&
-                    payment.status === PaymentStatus.SUCCEEDED
-                ) {
+                if (reservation.status === ReservationStatus.CONFIRMED && payment.status === PaymentStatus.SUCCEEDED) {
                     return NextResponse.json({ ok: true, alreadyPaid: true });
                 }
 
-                // Solo expiramos si estaba en HOLD
                 if (reservation.status === ReservationStatus.HOLD) {
                     await prisma.$transaction(async (tx) => {
                         await tx.reservation.update({
                             where: { id: reservation.id },
-                            data: {
-                                status: ReservationStatus.EXPIRED,
-                                holdExpiresAt: null,
-                            },
+                            data: { status: ReservationStatus.EXPIRED, holdExpiresAt: null },
                         });
 
                         await tx.payment.update({
@@ -198,7 +233,9 @@ export async function POST(req: NextRequest) {
         }
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Webhook error";
-        // 500 => Stripe reintenta (bien para fallos transitorios)
+        console.error("[stripe-webhook] ERROR:", msg);
+
+        // 500 para que Stripe reintente si fue fallo real
         return NextResponse.json({ ok: false, error: msg }, { status: 500 });
     }
 }

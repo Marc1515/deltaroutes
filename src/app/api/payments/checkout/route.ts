@@ -90,36 +90,44 @@ export async function POST(req: Request) {
             : undefined;
 
 
-    const session = await stripe.checkout.sessions.create(
-        {
-            mode: "payment",
+    let session: Stripe.Checkout.Session;
 
-            // 👇 AÑADIR ESTO
-            expires_at: expiresAtSeconds,
+    try {
+        session = await stripe.checkout.sessions.create(
+            {
+                mode: "payment",
 
-            customer_email: reservation.customer.email ?? undefined,
+                // Solo lo mandamos si existe (evita enviar undefined)
+                ...(expiresAtSeconds ? { expires_at: expiresAtSeconds } : {}),
 
-            line_items: [
-                {
-                    quantity: 1,
-                    price_data: {
-                        currency,
-                        unit_amount: amount,
-                        product_data: { name: "DeltaRoutes - Tour guiado" },
+                customer_email: reservation.customer.email ?? undefined,
+
+                line_items: [
+                    {
+                        quantity: 1,
+                        price_data: {
+                            currency,
+                            unit_amount: amount,
+                            product_data: { name: "DeltaRoutes - Tour guiado" },
+                        },
                     },
+                ],
+
+                success_url: `${appUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${appUrl}/checkout/cancel?session_id={CHECKOUT_SESSION_ID}`,
+
+                metadata: {
+                    reservationId: reservation.id,
+                    paymentId: reservation.payment.id,
                 },
-            ],
-
-            success_url: `${appUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${appUrl}/checkout/cancel?session_id={CHECKOUT_SESSION_ID}`,
-
-            metadata: {
-                reservationId: reservation.id,
-                paymentId: reservation.payment.id,
             },
-        },
-        { idempotencyKey }
-    );
+            { idempotencyKey }
+        );
+    } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "Stripe error";
+        return NextResponse.json({ error: message }, { status: 500 });
+    }
+
 
 
     // 5) Persistir refs Stripe en tu Payment
