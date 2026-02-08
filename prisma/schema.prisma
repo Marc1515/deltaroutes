@@ -66,6 +66,11 @@ enum CancelReason {
   WEATHER
 }
 
+enum ReservationCreatedEmailKind {
+  HOLD
+  WAITING
+}
+
 // --------------------
 // Users (empleados)
 // --------------------
@@ -94,7 +99,7 @@ model User {
 model Customer {
   id        String   @id @default(cuid())
   name      String
-  email     String?  @unique // recomendado para upsert por email
+  email     String  @unique
   phone     String?
   createdAt DateTime @default(now())
 
@@ -192,6 +197,12 @@ model Reservation {
   cancelledAt       DateTime?
   cancelReason      CancelReason?
   refundAmountCents Int           @default(0)
+
+    // Emails (idempotencia / anti-duplicados)
+  createdEmailSentAt   DateTime?
+  createdEmailKind     ReservationCreatedEmailKind?
+  confirmedEmailSentAt DateTime?
+
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

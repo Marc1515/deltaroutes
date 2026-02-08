@@ -271,6 +271,21 @@ export async function POST(req: Request) {
           if (result.kind === "HOLD") {
             const payUrl = `${appUrl}/checkout/start?reservationId=${fullReservation.id}`;
 
+            // Idempotencia: solo 1 email "created" por reserva
+            const mark = await prisma.reservation.updateMany({
+              where: { id: fullReservation.id, createdEmailSentAt: null },
+              data: {
+                createdEmailSentAt: new Date(),
+                createdEmailKind: result.kind, // "HOLD" | "WAITING"
+              },
+            });
+
+            if (mark.count === 0) {
+              // Ya se envió en otra ejecución/reintento
+              return NextResponse.json(result as CreateReservationResponse);
+            }
+
+
             await sendEmail({
               to: toEmail,
               subject: `DeltaRoutes · Reserva iniciada (${reservationCode})`,
