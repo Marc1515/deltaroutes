@@ -42,11 +42,7 @@ export async function POST(req: NextRequest) {
 
     let event: Stripe.Event;
     try {
-        event = stripe.webhooks.constructEvent(
-            rawBody,
-            sig,
-            process.env.STRIPE_WEBHOOK_SECRET as string
-        ) as Stripe.Event;
+        event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET as string) as Stripe.Event;
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Invalid signature";
         return NextResponse.json({ error: msg }, { status: 400 });
@@ -100,7 +96,7 @@ export async function POST(req: NextRequest) {
 
                 const payment = reservation.payment;
 
-                // Idempotencia
+                // Idempotencia: si ya está confirmado/pagado, no hacemos nada
                 if (reservation.status === ReservationStatus.CONFIRMED && payment.status === PaymentStatus.SUCCEEDED) {
                     return NextResponse.json({ ok: true, alreadyConfirmed: true });
                 }
@@ -150,31 +146,38 @@ export async function POST(req: NextRequest) {
 
                 console.log("[stripe-webhook] CONFIRMED:", reservation.id);
 
-                // Email (NO bloquear webhook)
+                // Email idempotente (NO bloquear webhook)
                 try {
-                    const toEmail = reservation.customer?.email;
-                    if (toEmail) {
-                        const reservationCode = reservation.id.slice(0, 8).toUpperCase();
+                    const mark = await prisma.reservation.updateMany({
+                        where: { id: reservation.id, confirmedEmailSentAt: { equals: null } },
+                        data: { confirmedEmailSentAt: new Date() },
+                    });
+
+                    if (mark.count === 1) {
+                        const reservationCode = `DR-${reservation.id.slice(0, 8).toUpperCase()}`;
                         const activityLabel = `Sesión ${reservation.sessionId.slice(0, 8).toUpperCase()}`;
-                        const startText = madridFormatter.format(reservation.session.bookingClosesAt);
+
+                        // Usa el campo real de inicio del tour
+                        const startText = madridFormatter.format(reservation.session.startAt);
+
                         const languageLabel = reservation.tourLanguage;
                         const amountText = `${(payment.amountCents / 100).toFixed(2)} ${payment.currency.toUpperCase()}`;
 
-                        sendEmail({
-                            to: toEmail,
+                        void sendEmail({
+                            to: reservation.customer.email,
                             subject: `DeltaRoutes · Reserva confirmada (${reservationCode})`,
                             react: PaymentConfirmedEmail({
-                                customerName: reservation.customer?.name ?? "Cliente",
+                                customerName: reservation.customer.name ?? "Cliente",
                                 activityLabel,
                                 startText,
                                 languageLabel,
                                 reservationCode,
                                 amountText,
                             }),
-                        }).catch((e) => console.warn("Payment confirmation email failed:", e));
+                        }).catch((e) => console.warn("[stripe-webhook] email failed:", e));
                     }
                 } catch (e) {
-                    console.warn("Payment confirmation email preparation failed:", e);
+                    console.warn("[stripe-webhook] email prep failed:", e);
                 }
 
                 return NextResponse.json({ ok: true });
@@ -188,7 +191,6 @@ export async function POST(req: NextRequest) {
                 }
 
                 const session = dataObj;
-
                 const reservationId = getMetadataValue(session, "reservationId");
 
                 const reservation = reservationId

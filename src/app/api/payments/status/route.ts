@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
@@ -48,11 +47,7 @@ export async function GET(req: Request) {
     });
 
     if (!payment) {
-        // Puede pasar si aún no se guardó stripeCheckoutSessionId o session_id no existe
-        return NextResponse.json(
-            { ok: false, found: false, message: "Payment not found yet" },
-            { status: 404 }
-        );
+        return NextResponse.json({ ok: false, found: false, message: "Payment not found yet" }, { status: 404 });
     }
 
     const reservation = payment.reservation;
@@ -100,10 +95,7 @@ export async function GET(req: Request) {
             const stripeCurrency = session.currency.toLowerCase();
 
             // Validación fuerte (igual que en el webhook)
-            if (
-                stripeAmount !== payment.amountCents ||
-                stripeCurrency !== payment.currency.toLowerCase()
-            ) {
+            if (stripeAmount !== payment.amountCents || stripeCurrency !== payment.currency.toLowerCase()) {
                 throw new Error(
                     `Amount/currency mismatch. stripe=${stripeAmount} ${stripeCurrency} db=${payment.amountCents} ${payment.currency}`
                 );
@@ -121,7 +113,10 @@ export async function GET(req: Request) {
                 if (!freshPayment) return;
 
                 // Si ya se confirmó por otro proceso entre medias, no hacemos nada
-                if (freshPayment.status === PaymentStatus.SUCCEEDED && freshPayment.reservation?.status === ReservationStatus.CONFIRMED) {
+                if (
+                    freshPayment.status === PaymentStatus.SUCCEEDED &&
+                    freshPayment.reservation?.status === ReservationStatus.CONFIRMED
+                ) {
                     return;
                 }
 
@@ -142,22 +137,30 @@ export async function GET(req: Request) {
                 });
             });
 
-            // Email (fire-and-forget) solo si tenemos email (Customer.email es nullable)
+            // Email idempotente (fire-and-forget)
             try {
-                const toEmail = reservation.customer.email;
-                if (toEmail) {
-                    const reservationCode = reservation.id.slice(0, 8).toUpperCase();
+                // 1) Marcamos el email como enviado SOLO si aún no lo estaba
+                const mark = await prisma.reservation.updateMany({
+                    where: { id: reservation.id, confirmedEmailSentAt: { equals: null } },
+                    data: { confirmedEmailSentAt: new Date() },
+                });
+
+                // 2) Solo el primero manda email
+                if (mark.count === 1) {
+                    const reservationCode = `DR-${reservation.id.slice(0, 8).toUpperCase()}`;
 
                     const activityLabel = reservation.session.experienceId
                         ? `Experiencia ${reservation.session.experienceId.slice(0, 8).toUpperCase()}`
                         : `Sesión ${reservation.sessionId.slice(0, 8).toUpperCase()}`;
 
+                    // Usa el campo real de inicio del tour (aquí tú ya usabas startAt)
                     const startText = madridFormatter.format(reservation.session.startAt);
+
                     const languageLabel = reservation.tourLanguage;
                     const amountText = `${(payment.amountCents / 100).toFixed(2)} ${payment.currency.toUpperCase()}`;
 
-                    sendEmail({
-                        to: toEmail,
+                    void sendEmail({
+                        to: reservation.customer.email,
                         subject: `DeltaRoutes · Reserva confirmada (${reservationCode})`,
                         react: PaymentConfirmedEmail({
                             customerName: reservation.customer.name ?? "Cliente",
@@ -184,7 +187,6 @@ export async function GET(req: Request) {
         } catch (e: unknown) {
             const msg = e instanceof Error ? e.message : "Reconcile error";
 
-            // No rompemos la UI con 500; devolvemos estado DB + motivo
             return NextResponse.json({
                 ok: true,
                 found: true,
