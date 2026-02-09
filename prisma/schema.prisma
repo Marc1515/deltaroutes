@@ -98,8 +98,10 @@ model User {
 // --------------------
 model Customer {
   id        String   @id @default(cuid())
-  name      String
-  email     String  @unique
+  // En tu nuevo flujo, en la 1ª ventana solo pides email.
+  // El nombre/apellidos se completan en la 3ª ventana -> lo hacemos opcional.
+  name      String?
+  email     String   @unique
   phone     String?
   createdAt DateTime @default(now())
 
@@ -137,7 +139,7 @@ model Experience {
 // Sessions (salidas/turnos)
 // --------------------
 model Session {
-  id           String    @id @default(cuid())
+  id           String   @id @default(cuid())
   experienceId String
   startAt      DateTime
   endAt        DateTime?
@@ -185,24 +187,37 @@ model Reservation {
   guideUserId String?
 
   status        ReservationStatus @default(HOLD)
-  holdExpiresAt DateTime? // si status=HOLD, caduca (ej. now + 30 min)
+  holdExpiresAt DateTime? // si status=HOLD, caduca (ej. now + 15/30 min)
 
-  // ✅ Lo único que el cliente elige (idioma del tour)
-  tourLanguage LanguageBase
+  // Pax (nuevo flujo: se pregunta en la 1ª ventana)
+  // Reglas en app: adultsCount >= 1, minorsCount >= 0, totalPax = adultsCount + minorsCount
+  adultsCount Int @default(1)
+  minorsCount Int @default(0)
+  totalPax    Int @default(1)
 
-  // ✅ Interno: idioma detectado del navegador (sirve para preselección/analítica/asignación preferente)
+  // Idioma del tour:
+  // - en WAITING aún no lo eligen => opcional
+  // - en HOLD/CONFIRMED debería existir (lo validas en backend antes de Stripe/confirmación)
+  tourLanguage LanguageBase?
+
+  // Interno: idioma detectado del navegador
   browserLanguage LanguageCode?
 
   // Cancelación y métricas
   cancelledAt       DateTime?
   cancelReason      CancelReason?
-  refundAmountCents Int           @default(0)
+  refundAmountCents Int @default(0)
 
-    // Emails (idempotencia / anti-duplicados)
-  createdEmailSentAt   DateTime?
-  createdEmailKind     ReservationCreatedEmailKind?
+  // Emails (idempotencia / anti-duplicados)
+  // 1) Email al crear HOLD o WAITING
+  createdEmailSentAt DateTime?
+  createdEmailKind   ReservationCreatedEmailKind?
+
+  // 2) Email al confirmar pago
   confirmedEmailSentAt DateTime?
 
+  // 3) Email "ya hay sitio" (para WAITING -> avisar cuando freeSeats >= totalPax)
+  availabilityEmailSentAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -216,10 +231,13 @@ model Reservation {
   // Evita doble reserva del mismo cliente en la misma sesión
   @@unique([sessionId, customerId])
 
+  // Índices útiles
   @@index([sessionId, status])
-  @@index([sessionId, guideUserId, status])
+  @@index([sessionId, status, holdExpiresAt])
   @@index([status, holdExpiresAt])
+  @@index([status, availabilityEmailSentAt])
   @@index([cancelReason, cancelledAt])
+  @@index([guideUserId, status])
 }
 
 // --------------------
