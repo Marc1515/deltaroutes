@@ -1,3 +1,5 @@
+// src/emails/ReservationWaitingEmail.tsx
+
 import * as React from "react";
 import {
   Html,
@@ -15,17 +17,27 @@ type Props = {
   customerName: string;
   activityLabel: string;
   startText: string;
-  languageLabel: string;
   reservationCode: string;
+
+  adultsCount: number;
+  minorsCount: number;
+  totalPax: number;
 };
 
 export default function ReservationWaitingEmail({
   customerName,
   activityLabel,
   startText,
-  languageLabel,
   reservationCode,
+  adultsCount,
+  minorsCount,
+  totalPax,
 }: Props) {
+  const groupText =
+    minorsCount > 0
+      ? `${adultsCount} adulto(s) y ${minorsCount} menor(es)`
+      : `${adultsCount} adulto(s)`;
+
   return (
     <Html>
       <Head />
@@ -42,7 +54,7 @@ export default function ReservationWaitingEmail({
               <Text className="text-slate-700">Hola {customerName},</Text>
 
               <Text className="text-slate-700">
-                Por ahora no quedan plazas disponibles para{" "}
+                Ahora mismo no quedan plazas suficientes para{" "}
                 <span className="font-semibold">{activityLabel}</span>, pero te
                 hemos añadido a la{" "}
                 <span className="font-semibold">lista de espera</span>.
@@ -52,9 +64,12 @@ export default function ReservationWaitingEmail({
                 <Text className="m-0 text-slate-700">
                   <span className="font-semibold">Fecha:</span> {startText}
                 </Text>
+
                 <Text className="m-0 text-slate-700">
-                  <span className="font-semibold">Idioma:</span> {languageLabel}
+                  <span className="font-semibold">Grupo:</span> {groupText}{" "}
+                  <span className="text-slate-500">({totalPax} en total)</span>
                 </Text>
+
                 <Text className="m-0 text-slate-700">
                   <span className="font-semibold">Código:</span>{" "}
                   {reservationCode}
@@ -64,7 +79,9 @@ export default function ReservationWaitingEmail({
               <Hr className="my-6 border-slate-200" />
 
               <Text className="text-xs text-slate-400">
-                Te avisaremos si se libera una plaza o se amplía disponibilidad.
+                Te avisaremos cuando se liberen{" "}
+                <span className="font-semibold">{totalPax}</span> plaza(s) para
+                tu grupo.
               </Text>
             </Section>
           </Container>
