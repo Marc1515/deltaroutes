@@ -1,3 +1,4 @@
+// scripts/db/create-future-session.ts
 import "dotenv/config";
 import { prisma } from "../../src/lib/prisma";
 
@@ -14,15 +15,13 @@ async function main() {
 
     const now = new Date();
 
-    // mañana a las 11:00 (hora local)
-    const startAt = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate() + 1,
-        11, 0, 0, 0
-    );
-
+    // Mañana a las 11:00 (hora local del sistema)
+    const startAt = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 11, 0, 0, 0);
     const bookingClosesAt = addHours(startAt, -4);
+
+    // Precios demo (ajusta a lo que uses en tu negocio)
+    const adultPriceCents = 5000; // 50€
+    const minorPriceCents = 2500; // 25€
 
     const created = await prisma.session.create({
         data: {
@@ -31,12 +30,20 @@ async function main() {
             endAt: addHours(startAt, 2),
             meetingPoint: "Punto de encuentro (demo)",
             mapsUrl: null,
+
+            // Capacidad
             maxSeatsTotal: 20,
             maxPerGuide: 6,
+
+            // Cierre de reservas
             bookingClosesAt,
-            priceCents: 2500,
+
+            // Precio por pax
+            adultPriceCents,
+            minorPriceCents,
             currency: "eur",
             requiresPayment: true,
+
             isCancelled: false,
         },
         include: { experience: true },
@@ -47,6 +54,8 @@ async function main() {
         experience: created.experience.title,
         startAt: created.startAt.toISOString(),
         bookingClosesAt: created.bookingClosesAt.toISOString(),
+        adultPriceCents: created.adultPriceCents,
+        minorPriceCents: created.minorPriceCents,
     });
 }
 
