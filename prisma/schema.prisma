@@ -154,7 +154,8 @@ model Session {
   bookingClosesAt DateTime
 
   // Precio (Stripe)
-  priceCents      Int
+  adultPriceCents Int @default(5000)
+  minorPriceCents Int @default(2500)
   currency        String  @default("eur")
   requiresPayment Boolean @default(true)
 
