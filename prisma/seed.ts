@@ -1,8 +1,6 @@
 // prisma/seed.ts
 import { ExperienceType, UserRole, LanguageCode } from "../src/generated/prisma";
-import {prisma} from "../src/lib/prisma";
-
-
+import { prisma } from "../src/lib/prisma";
 
 function addDays(base: Date, days: number) {
   const d = new Date(base);
@@ -17,14 +15,23 @@ function setTime(date: Date, hour: number, minute = 0) {
 }
 
 async function main() {
-  // --- Admin ---
+  // --------------------
+  // Admin
+  // --------------------
   await prisma.user.upsert({
     where: { email: "admin@deltaroutes.local" },
     update: { name: "Admin", role: UserRole.ADMIN, isActive: true },
-    create: { email: "admin@deltaroutes.local", name: "Admin", role: UserRole.ADMIN },
+    create: {
+      email: "admin@deltaroutes.local",
+      name: "Admin",
+      role: UserRole.ADMIN,
+      isActive: true,
+    },
   });
 
-  // --- Guides (5) ---
+  // --------------------
+  // Guides (5)
+  // --------------------
   const guidesData = [
     {
       email: "guide1@deltaroutes.local",
@@ -39,7 +46,7 @@ async function main() {
     {
       email: "guide3@deltaroutes.local",
       name: "Eric (Guía)",
-      languages: [LanguageCode.CA, LanguageCode.ES, LanguageCode.EN, LanguageCode.DE], // extra
+      languages: [LanguageCode.CA, LanguageCode.ES, LanguageCode.EN, LanguageCode.DE],
     },
     {
       email: "guide4@deltaroutes.local",
@@ -72,7 +79,9 @@ async function main() {
     });
   }
 
-  // --- Experiences (4) ---
+  // --------------------
+  // Experiences (4)
+  // --------------------
   const experiences = [
     {
       slug: "tour-bici-arrozales-deltebre",
@@ -85,7 +94,7 @@ async function main() {
       location: "Deltebre",
       isPublished: true,
       supportedLanguages: [LanguageCode.CA, LanguageCode.ES, LanguageCode.EN],
-      coverImage: null,
+      coverImage: null as string | null,
     },
     {
       slug: "kayak-sunset-amposta",
@@ -98,7 +107,7 @@ async function main() {
       location: "Amposta",
       isPublished: true,
       supportedLanguages: [LanguageCode.CA, LanguageCode.ES, LanguageCode.EN, LanguageCode.DE],
-      coverImage: null,
+      coverImage: null as string | null,
     },
     {
       slug: "tour-a-pie-sant-jaume",
@@ -111,7 +120,7 @@ async function main() {
       location: "Sant Jaume d'Enveja",
       isPublished: true,
       supportedLanguages: [LanguageCode.CA, LanguageCode.ES, LanguageCode.EN],
-      coverImage: null,
+      coverImage: null as string | null,
     },
     {
       slug: "mini-crucero-rio-extranjeros",
@@ -124,7 +133,7 @@ async function main() {
       location: "Amposta",
       isPublished: true,
       supportedLanguages: [LanguageCode.CA, LanguageCode.ES, LanguageCode.EN, LanguageCode.DE],
-      coverImage: null,
+      coverImage: null as string | null,
     },
   ];
 
@@ -138,10 +147,16 @@ async function main() {
     createdExperiences.push(e);
   }
 
-  // --- Sessions (3 por experiencia) ---
+  // --------------------
+  // Sessions (3 por experiencia)
+  // --------------------
   // Reglas:
   // - bookingClosesAt = startAt - 4h
-  // - priceCents y capacidades distintas
+  // - precios por pax: adultPriceCents / minorPriceCents
+  // - capacidades distintas por tipo
+  //
+  // Nota: como NO tienes unique compuesto (experienceId+startAt),
+  // hacemos idempotencia manual: findFirst -> update/create.
   const now = new Date();
   const sessionDays = [2, 5, 8];
 
@@ -152,9 +167,7 @@ async function main() {
       // Horarios distintos para variedad
       const startAt = setTime(day, exp.type === ExperienceType.MINI_CRUISE ? 12 : 18, 0);
 
-      const durationMin =
-        exp.type === ExperienceType.WALKING_TOUR ? 150 : exp.durationMin;
-
+      const durationMin = exp.type === ExperienceType.WALKING_TOUR ? 150 : exp.durationMin;
       const endAt = new Date(startAt.getTime() + durationMin * 60 * 1000);
       const bookingClosesAt = new Date(startAt.getTime() - 4 * 60 * 60 * 1000);
 
@@ -164,24 +177,42 @@ async function main() {
       const maxSeatsTotal = isMiniCruise ? 20 : isKayak ? 12 : 16;
       const maxPerGuide = isMiniCruise ? 20 : 6;
 
-      const priceCents = isMiniCruise ? 2500 : isKayak ? 3500 : 2000;
+      // Precios demo (ajusta si quieres):
+      // - Bici/a pie: 50€ adultos / 25€ menores
+      // - Kayak: 35€ adultos / 25€ menores
+      // - Mini-crucero: 25€ adultos / 25€ menores
+      const adultPriceCents = isMiniCruise ? 2500 : isKayak ? 3500 : 5000;
+      const minorPriceCents = isMiniCruise ? 2500 : 2500;
 
-      await prisma.session.create({
-        data: {
-          experienceId: exp.id,
-          startAt,
-          endAt,
-          meetingPoint: "Punto de encuentro por confirmar (añadir Maps URL en edición)",
-          mapsUrl: null,
-          maxSeatsTotal,
-          maxPerGuide,
-          bookingClosesAt,
-          priceCents,
-          currency: "eur",
-          requiresPayment: true,
-          // política por defecto: 48/24/50 ya viene por defaults
-        },
+      const sessionData = {
+        experienceId: exp.id,
+        startAt,
+        endAt,
+        meetingPoint: "Punto de encuentro por confirmar (añadir Maps URL en edición)",
+        mapsUrl: null as string | null,
+        maxSeatsTotal,
+        maxPerGuide,
+        bookingClosesAt,
+        adultPriceCents,
+        minorPriceCents,
+        currency: "eur",
+        requiresPayment: true,
+        isCancelled: false,
+      };
+
+      const existing = await prisma.session.findFirst({
+        where: { experienceId: exp.id, startAt },
+        select: { id: true },
       });
+
+      if (existing) {
+        await prisma.session.update({
+          where: { id: existing.id },
+          data: sessionData,
+        });
+      } else {
+        await prisma.session.create({ data: sessionData });
+      }
     }
   }
 
