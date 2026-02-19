@@ -4,11 +4,36 @@ import { ReservationStatus } from "@/generated/prisma";
 
 export const runtime = "nodejs";
 
-export async function GET(
-    _req: Request,
-    { params }: { params: { waitingId: string } }
-) {
-    const waitingId = params.waitingId;
+type ParamsObj = { waitingId?: string };
+type Ctx = { params: ParamsObj | Promise<ParamsObj> };
+
+function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+function hasParams(value: unknown): value is Ctx {
+    if (!isObject(value)) return false;
+    return "params" in value;
+}
+
+async function getWaitingId(ctx: unknown): Promise<string | undefined> {
+    if (!hasParams(ctx)) return undefined;
+
+    const p = ctx.params;
+    const params = p instanceof Promise ? await p : p;
+
+    return typeof params.waitingId === "string" ? params.waitingId : undefined;
+}
+
+export async function GET(_req: Request, ctx: unknown) {
+    const waitingId = await getWaitingId(ctx);
+
+    if (!waitingId) {
+        return NextResponse.json(
+            { ok: false, error: "Missing waitingId param" },
+            { status: 400 },
+        );
+    }
 
     const now = new Date();
 
@@ -21,56 +46,55 @@ export async function GET(
     });
 
     if (!waiting) {
-        return NextResponse.json({ ok: false, error: "Waiting reservation not found" }, { status: 404 });
+        return NextResponse.json(
+            { ok: false, error: "Waiting reservation not found" },
+            { status: 404 },
+        );
     }
 
     if (waiting.status !== ReservationStatus.WAITING) {
-        return NextResponse.json({ ok: false, error: "Reservation is not WAITING" }, { status: 400 });
+        return NextResponse.json(
+            { ok: false, error: "Reservation is not WAITING" },
+            { status: 400 },
+        );
     }
 
     const session = waiting.session;
 
+    // Helpers para no repetir JSON
+    const base = {
+        ok: true as const,
+        waitingId,
+        sessionId: session.id,
+        experienceTitle: session.experience.title,
+        startAt: session.startAt.toISOString(),
+        bookingClosesAt: session.bookingClosesAt.toISOString(),
+        adultsCount: waiting.adultsCount,
+        minorsCount: waiting.minorsCount,
+        totalPax: waiting.totalPax,
+        customerEmail: waiting.customer.email,
+        customerName: waiting.customer.name ?? null,
+        maxSeatsTotal: session.maxSeatsTotal,
+    };
+
     if (session.isCancelled) {
         return NextResponse.json({
-            ok: true,
-            waitingId,
-            sessionId: session.id,
-            experienceTitle: session.experience.title,
-            startAt: session.startAt.toISOString(),
-            bookingClosesAt: session.bookingClosesAt.toISOString(),
-            adultsCount: waiting.adultsCount,
-            minorsCount: waiting.minorsCount,
-            totalPax: waiting.totalPax,
-            customerEmail: waiting.customer.email,
-            customerName: waiting.customer.name ?? null,
+            ...base,
             canClaimNow: false,
             freeSeats: 0,
-            maxSeatsTotal: session.maxSeatsTotal,
             isCancelled: true,
         });
     }
 
     if (now > session.bookingClosesAt) {
         return NextResponse.json({
-            ok: true,
-            waitingId,
-            sessionId: session.id,
-            experienceTitle: session.experience.title,
-            startAt: session.startAt.toISOString(),
-            bookingClosesAt: session.bookingClosesAt.toISOString(),
-            adultsCount: waiting.adultsCount,
-            minorsCount: waiting.minorsCount,
-            totalPax: waiting.totalPax,
-            customerEmail: waiting.customer.email,
-            customerName: waiting.customer.name ?? null,
+            ...base,
             canClaimNow: false,
             freeSeats: 0,
-            maxSeatsTotal: session.maxSeatsTotal,
             isCancelled: false,
         });
     }
 
-    // freeSeats actual: CONFIRMED + HOLD activo
     const reservedAgg = await prisma.reservation.aggregate({
         where: {
             sessionId: session.id,
@@ -87,20 +111,9 @@ export async function GET(
     const canClaimNow = freeSeats >= waiting.totalPax;
 
     return NextResponse.json({
-        ok: true,
-        waitingId,
-        sessionId: session.id,
-        experienceTitle: session.experience.title,
-        startAt: session.startAt.toISOString(),
-        bookingClosesAt: session.bookingClosesAt.toISOString(),
-        adultsCount: waiting.adultsCount,
-        minorsCount: waiting.minorsCount,
-        totalPax: waiting.totalPax,
-        customerEmail: waiting.customer.email,
-        customerName: waiting.customer.name ?? null,
+        ...base,
         canClaimNow,
         freeSeats,
-        maxSeatsTotal: session.maxSeatsTotal,
         isCancelled: false,
     });
 }

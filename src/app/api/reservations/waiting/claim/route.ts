@@ -1,61 +1,67 @@
-import "dotenv/config";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import {
-    ReservationStatus,
-    PaymentStatus,
-    LanguageBase,
-    LanguageCode,
-} from "@/generated/prisma";
+import { ReservationStatus, PaymentStatus } from "@/generated/prisma";
 import { HOLD_MINUTES } from "@/config/app";
 
 export const runtime = "nodejs";
 
 type Body = {
-    waitingId: string;
-    customerName: string;
-    customerPhone?: string | null;
-    tourLanguage: LanguageBase; // CA | ES | EN
+    waitingId?: string;
 };
 
-function isBaseLanguage(lng: LanguageCode) {
-    return lng === LanguageCode.CA || lng === LanguageCode.ES || lng === LanguageCode.EN;
+type ClaimOk = { ok: true; reservationId: string; holdExpiresAt: string };
+type ClaimErr = {
+    ok: false;
+    error: string;
+    code?: "NO_SEATS" | "NOT_WAITING" | "CLOSED" | "CANCELLED" | "NO_GUIDE";
+};
+
+function addMinutes(d: Date, minutes: number) {
+    return new Date(d.getTime() + minutes * 60_000);
 }
 
-export async function POST(req: Request) {
-    const body = (await req.json()) as Body;
+function isSerializationError(e: unknown): boolean {
+    if (!(e instanceof Error)) return false;
+    const msg = e.message.toLowerCase();
+    return msg.includes("serialization") || msg.includes("could not serialize");
+}
 
-    if (!body.waitingId || !body.customerName || !body.tourLanguage) {
-        return NextResponse.json({ ok: false, error: "Missing required fields" }, { status: 400 });
-    }
-
+async function attemptClaim(waitingId: string): Promise<ClaimOk | ClaimErr> {
     const now = new Date();
+    const holdExpiresAt = addMinutes(now, HOLD_MINUTES);
 
-    try {
-        const result = await prisma.$transaction(async (tx) => {
-            const waiting = await tx.reservation.findUniqueOrThrow({
-                where: { id: body.waitingId },
+    return prisma.$transaction(
+        async (tx) => {
+            const waiting = await tx.reservation.findUnique({
+                where: { id: waitingId },
                 include: {
-                    customer: true,
                     session: true,
+                    customer: true,
                 },
             });
 
-            if (waiting.status !== ReservationStatus.WAITING) {
-                return { ok: false as const, status: 400, error: "Reservation is not WAITING" };
+            if (!waiting) {
+                return { ok: false, code: "NOT_WAITING", error: "Reservation not found" };
             }
 
-            const session = waiting.session;
+            // ✅ desde aquí solo usamos `w` (no-null)
+            const w = waiting;
+
+            if (w.status !== ReservationStatus.WAITING) {
+                return { ok: false, code: "NOT_WAITING", error: "Reservation is not WAITING" };
+            }
+
+            const session = w.session;
 
             if (session.isCancelled) {
-                return { ok: false as const, status: 400, error: "Session is cancelled" };
+                return { ok: false, code: "CANCELLED", error: "Session is cancelled" };
             }
 
             if (now > session.bookingClosesAt) {
-                return { ok: false as const, status: 400, error: "Booking is closed for this session" };
+                return { ok: false, code: "CLOSED", error: "Booking is closed for this session" };
             }
 
-            // Recalcular plazas libres (CONFIRMED + HOLD activo)
+            // 1) plazas libres (CONFIRMED + HOLD activo)
             const reservedAgg = await tx.reservation.aggregate({
                 where: {
                     sessionId: session.id,
@@ -70,31 +76,15 @@ export async function POST(req: Request) {
             const reservedSeats = reservedAgg._sum.totalPax ?? 0;
             const freeSeats = Math.max(0, session.maxSeatsTotal - reservedSeats);
 
-            if (freeSeats < waiting.totalPax) {
-                return { ok: false as const, status: 409, error: "Not enough free seats right now" };
+            if (freeSeats < w.totalPax) {
+                return { ok: false, code: "NO_SEATS", error: "Not enough free seats right now" };
             }
 
-            // Actualizar customer info (nombre/teléfono) al reclamar
-            await tx.customer.update({
-                where: { id: waiting.customerId },
-                data: {
-                    name: body.customerName,
-                    phone: body.customerPhone ?? undefined,
-                },
-            });
-
-            // Asignación de guía (misma lógica que ya usas, por carga en pax)
+            // 2) guía: sin depender de tourLanguage (aún no existe)
             const candidateGuides = await tx.user.findMany({
                 where: { role: "GUIDE", isActive: true },
-                select: { id: true, languages: true },
+                select: { id: true },
             });
-
-            const browserLanguage = waiting.browserLanguage;
-
-            const preferredGuides =
-                browserLanguage && !isBaseLanguage(browserLanguage)
-                    ? candidateGuides.filter((g) => g.languages.includes(browserLanguage))
-                    : [];
 
             async function pickLeastLoaded(guideIds: string[]): Promise<string | null> {
                 if (guideIds.length === 0) return null;
@@ -121,38 +111,35 @@ export async function POST(req: Request) {
                     .map((id) => ({ id, load: loadMap.get(id) ?? 0 }))
                     .sort((a, b) => a.load - b.load);
 
-                const chosen = sorted.find((g) => g.load + waiting.totalPax <= session.maxPerGuide);
+                const chosen = sorted.find((g) => g.load + w.totalPax <= session.maxPerGuide);
                 return chosen?.id ?? null;
             }
 
-            let guideUserId: string | null = await pickLeastLoaded(preferredGuides.map((g) => g.id));
-            if (!guideUserId) guideUserId = await pickLeastLoaded(candidateGuides.map((g) => g.id));
-
+            const guideUserId = await pickLeastLoaded(candidateGuides.map((g) => g.id));
             if (!guideUserId) {
-                return { ok: false as const, status: 409, error: "No guide available right now" };
+                return { ok: false, code: "NO_GUIDE", error: "No guide capacity right now" };
             }
 
-            const holdExpiresAt = new Date(now.getTime() + (HOLD_MINUTES + 1) * 60 * 1000);
-
-            // Convertimos WAITING -> HOLD
-            await tx.reservation.update({
-                where: { id: waiting.id },
+            // 3) UPDATE condicionado
+            const updated = await tx.reservation.updateMany({
+                where: { id: w.id, status: ReservationStatus.WAITING },
                 data: {
                     status: ReservationStatus.HOLD,
                     holdExpiresAt,
                     guideUserId,
-                    tourLanguage: body.tourLanguage,
                 },
             });
 
-            // Payment (monto por pax * precios sesión)
-            const amountCents =
-                waiting.adultsCount * session.adultPriceCents +
-                waiting.minorsCount * session.minorPriceCents;
+            if (updated.count !== 1) {
+                return { ok: false, code: "NO_SEATS", error: "Race lost" };
+            }
+
+            // 4) Payment
+            const amountCents = w.adultsCount * session.adultPriceCents + w.minorsCount * session.minorPriceCents;
 
             if (session.requiresPayment) {
                 await tx.payment.upsert({
-                    where: { reservationId: waiting.id },
+                    where: { reservationId: w.id },
                     update: {
                         status: PaymentStatus.REQUIRES_PAYMENT,
                         amountCents,
@@ -161,7 +148,7 @@ export async function POST(req: Request) {
                         stripePaymentIntentId: null,
                     },
                     create: {
-                        reservationId: waiting.id,
+                        reservationId: w.id,
                         status: PaymentStatus.REQUIRES_PAYMENT,
                         amountCents,
                         currency: session.currency,
@@ -169,7 +156,7 @@ export async function POST(req: Request) {
                 });
             } else {
                 await tx.payment.upsert({
-                    where: { reservationId: waiting.id },
+                    where: { reservationId: w.id },
                     update: {
                         status: PaymentStatus.NOT_REQUIRED,
                         amountCents: 0,
@@ -178,7 +165,7 @@ export async function POST(req: Request) {
                         stripePaymentIntentId: null,
                     },
                     create: {
-                        reservationId: waiting.id,
+                        reservationId: w.id,
                         status: PaymentStatus.NOT_REQUIRED,
                         amountCents: 0,
                         currency: session.currency,
@@ -186,20 +173,31 @@ export async function POST(req: Request) {
                 });
             }
 
-            return {
-                ok: true as const,
-                reservationId: waiting.id,
-                holdExpiresAt: holdExpiresAt.toISOString(),
-            };
-        });
+            return { ok: true, reservationId: w.id, holdExpiresAt: holdExpiresAt.toISOString() };
+        },
+        { isolationLevel: "Serializable" },
+    );
+}
 
-        if (!result.ok) {
-            return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
-        }
+export async function POST(req: Request) {
+    const body = (await req.json()) as Body;
 
-        return NextResponse.json(result);
-    } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "Unknown error";
-        return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    const waitingId = body.waitingId?.trim();
+    if (!waitingId) {
+        return NextResponse.json({ ok: false, error: "waitingId is required" }, { status: 400 });
     }
+
+    for (let i = 0; i < 3; i++) {
+        try {
+            const result = await attemptClaim(waitingId);
+            const status = result.ok ? 200 : 409;
+            return NextResponse.json(result, { status });
+        } catch (e: unknown) {
+            if (isSerializationError(e) && i < 2) continue;
+            const msg = e instanceof Error ? e.message : "Unknown error";
+            return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+        }
+    }
+
+    return NextResponse.json({ ok: false, error: "Could not claim" }, { status: 409 });
 }
