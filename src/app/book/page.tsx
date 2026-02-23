@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 
 type WaitingInfo =
   | {
@@ -33,6 +33,10 @@ type ClaimResponse =
 
 type UpdateHoldResponse = { ok: true } | { ok: false; error: string };
 
+type CheckoutResponse =
+  | { ok: true; checkoutUrl: string; reused?: boolean }
+  | { ok?: false; error: string };
+
 function safePreview(text: string, max = 180) {
   const oneLine = text.replace(/\s+/g, " ").trim();
   return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
@@ -40,12 +44,11 @@ function safePreview(text: string, max = 180) {
 
 export default function BookPage() {
   const sp = useSearchParams();
-  const router = useRouter();
   const waitingId = sp.get("waitingId");
 
   const [info, setInfo] = useState<WaitingInfo | null>(null);
-  const [step, setStep] = useState<"pre" | "details">("pre"); // ✅ NUEVO
-  const [reservationId, setReservationId] = useState<string | null>(null); // ✅ NUEVO
+  const [step, setStep] = useState<"pre" | "details">("pre");
+  const [reservationId, setReservationId] = useState<string | null>(null);
 
   const [loadingClaim, setLoadingClaim] = useState(false);
   const [loadingComplete, setLoadingComplete] = useState(false);
@@ -123,7 +126,6 @@ export default function BookPage() {
       }
 
       if (!res.ok || !json.ok) {
-        // ✅ UX “alguien se te ha adelantado”
         const msg = json.ok
           ? "No se ha podido reclamar."
           : json.code === "NO_SEATS"
@@ -138,7 +140,6 @@ export default function BookPage() {
         return;
       }
 
-      // ✅ CLAIM OK -> pasamos a detalles
       setReservationId(json.reservationId);
       setStep("details");
     } catch (e) {
@@ -159,7 +160,7 @@ export default function BookPage() {
 
     setLoadingComplete(true);
     try {
-      // ✅ Guardamos detalles en el HOLD
+      // 1) Guardamos detalles en el HOLD
       const res = await fetch("/api/reservations/hold/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -189,10 +190,42 @@ export default function BookPage() {
         return;
       }
 
-      // ✅ Ahora sí -> Stripe
-      router.push(
-        `/checkout/start?reservationId=${encodeURIComponent(reservationId)}`,
-      );
+      // 2) Crear checkout de Stripe (API server-side) y redirigir
+      const payRes = await fetch("/api/payments/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ reservationId }),
+      });
+
+      const payRaw = await payRes.text();
+      let payJson: CheckoutResponse;
+
+      try {
+        payJson = JSON.parse(payRaw) as CheckoutResponse;
+      } catch {
+        alert(
+          `Respuesta no-JSON al iniciar pago (${payRes.status}). Preview: ${safePreview(payRaw)}`,
+        );
+        return;
+      }
+
+      if (
+        !payRes.ok ||
+        !payJson.ok ||
+        !("checkoutUrl" in payJson) ||
+        !payJson.checkoutUrl
+      ) {
+        alert(
+          "error" in payJson && payJson.error
+            ? payJson.error
+            : "No se pudo iniciar el pago.",
+        );
+        return;
+      }
+
+      // ✅ redirect a Stripe
+      window.location.href = payJson.checkoutUrl;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Error completando reserva";
       alert(msg);
@@ -250,7 +283,6 @@ export default function BookPage() {
         </p>
       </div>
 
-      {/* ✅ PASO 1: solo el botón */}
       {step === "pre" && (
         <div className="mt-6">
           <button
@@ -275,7 +307,6 @@ export default function BookPage() {
         </div>
       )}
 
-      {/* ✅ PASO 2: formulario (ya con HOLD creado) */}
       {step === "details" && (
         <div className="mt-6 space-y-3">
           <label className="block">

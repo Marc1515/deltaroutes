@@ -5,6 +5,10 @@ function addHours(date: Date, hours: number) {
     return new Date(date.getTime() + hours * 60 * 60 * 1000);
 }
 
+function addMinutes(date: Date, minutes: number) {
+    return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
 async function main() {
     const exp = await prisma.experience.findFirst({
         orderBy: { createdAt: "asc" },
@@ -14,19 +18,32 @@ async function main() {
 
     const now = new Date();
 
-    // mañana a las 11:00 (hora local)
-    const startAt = new Date(
+    // Base: mañana a las 11:00 (hora local)
+    const baseStartAt = new Date(
         now.getFullYear(),
         now.getMonth(),
         now.getDate() + 1,
-        11, 0, 0, 0
+        11,
+        0,
+        0,
+        0,
     );
+
+    // ✅ Para que SIEMPRE sea único:
+    // añadimos un offset de minutos (0..59) según el minuto actual,
+    // y además lo forzamos a un múltiplo de 5 para que quede “bonito”
+    const offset = Math.floor(now.getMinutes() / 5) * 5;
+    const startAt = addMinutes(baseStartAt, offset);
 
     const bookingClosesAt = addHours(startAt, -4);
 
-    // Defaults de demo (ajústalos si quieres)
+    // Defaults de demo
     const adultPriceCents = 5000;
     const minorPriceCents = 2500;
+
+    // Defaults para tests
+    const maxSeatsTotal = 5;
+    const maxPerGuide = 6;
 
     const created = await prisma.session.create({
         data: {
@@ -35,8 +52,8 @@ async function main() {
             endAt: addHours(startAt, 2),
             meetingPoint: "Punto de encuentro (demo)",
             mapsUrl: null,
-            maxSeatsTotal: 20,
-            maxPerGuide: 6,
+            maxSeatsTotal,
+            maxPerGuide,
             bookingClosesAt,
             adultPriceCents,
             minorPriceCents,
@@ -54,6 +71,8 @@ async function main() {
         bookingClosesAt: created.bookingClosesAt.toISOString(),
         adultPriceCents: created.adultPriceCents,
         minorPriceCents: created.minorPriceCents,
+        maxSeatsTotal: created.maxSeatsTotal,
+        maxPerGuide: created.maxPerGuide,
     });
 }
 
