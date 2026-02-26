@@ -37,6 +37,8 @@ type CheckoutResponse =
   | { ok: true; checkoutUrl: string; reused?: boolean }
   | { ok?: false; error: string };
 
+type ResubscribeResponse = { ok: true } | { ok: false; error: string };
+
 function safePreview(text: string, max = 180) {
   const oneLine = text.replace(/\s+/g, " ").trim();
   return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
@@ -53,6 +55,9 @@ export default function BookPage() {
   const [loadingClaim, setLoadingClaim] = useState(false);
   const [loadingComplete, setLoadingComplete] = useState(false);
 
+  const [showUps, setShowUps] = useState(false);
+  const [loadingResubscribe, setLoadingResubscribe] = useState(false);
+
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [tourLanguage, setTourLanguage] = useState<"CA" | "ES" | "EN">("ES");
@@ -62,31 +67,52 @@ export default function BookPage() {
     return `/api/reservations/waiting/${encodeURIComponent(waitingId)}`;
   }, [waitingId]);
 
+  // reset al cambiar waitingId
+  useEffect(() => {
+    setInfo(null);
+    setStep("pre");
+    setReservationId(null);
+    setShowUps(false);
+  }, [waitingId]);
+
+  async function loadWaitingInfo() {
+    if (!endpoint) return;
+
+    const res = await fetch(endpoint, { cache: "no-store" });
+    const raw = await res.text();
+
+    let json: WaitingInfo;
+    try {
+      json = JSON.parse(raw) as WaitingInfo;
+    } catch {
+      setInfo({
+        ok: false,
+        error: `Respuesta no-JSON (${res.status}). Preview: ${safePreview(raw)}`,
+      });
+      return;
+    }
+
+    setInfo(json);
+
+    if (json.ok) {
+      setCustomerName(json.customerName ?? "");
+
+      // ✅ Si al abrir el link NO hay plazas suficientes, mostramos directamente el “Ups…”
+      if (!json.canClaimNow) {
+        setShowUps(true);
+      } else {
+        setShowUps(false);
+      }
+    }
+  }
+
   useEffect(() => {
     if (!endpoint) return;
 
     let cancelled = false;
-
     (async () => {
       try {
-        const res = await fetch(endpoint, { cache: "no-store" });
-        const raw = await res.text();
-
-        let json: WaitingInfo;
-        try {
-          json = JSON.parse(raw) as WaitingInfo;
-        } catch {
-          const msg = `Respuesta no-JSON (${res.status}). Preview: ${safePreview(raw)}`;
-          if (!cancelled) setInfo({ ok: false, error: msg });
-          return;
-        }
-
-        if (cancelled) return;
-        setInfo(json);
-
-        if (json.ok) {
-          setCustomerName(json.customerName ?? "");
-        }
+        await loadWaitingInfo();
       } catch (e) {
         if (cancelled) return;
         const msg =
@@ -98,6 +124,7 @@ export default function BookPage() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [endpoint]);
 
   async function onClaim() {
@@ -126,14 +153,21 @@ export default function BookPage() {
       }
 
       if (!res.ok || !json.ok) {
+        // ✅ Si pierde la carrera -> Ups + opción re-avisar
+        if (!json.ok && json.code === "NO_SEATS") {
+          setShowUps(true);
+          await loadWaitingInfo();
+          return;
+        }
+
         const msg = json.ok
           ? "No se ha podido reclamar."
-          : json.code === "NO_SEATS"
-            ? "Ups… alguien se te ha adelantado y ya no quedan plazas para tu grupo."
-            : json.code === "CLOSED"
-              ? "Las reservas para esta sesión ya están cerradas."
-              : json.code === "CANCELLED"
-                ? "Esta sesión está cancelada."
+          : json.code === "CLOSED"
+            ? "Las reservas para esta sesión ya están cerradas."
+            : json.code === "CANCELLED"
+              ? "Esta sesión está cancelada."
+              : json.code === "NOT_WAITING"
+                ? "Esta reserva ya no está en lista de espera."
                 : json.error;
 
         alert(msg);
@@ -142,11 +176,54 @@ export default function BookPage() {
 
       setReservationId(json.reservationId);
       setStep("details");
+      setShowUps(false);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Error reclamando plazas";
       alert(msg);
     } finally {
       setLoadingClaim(false);
+    }
+  }
+
+  async function onResubscribe() {
+    if (!waitingId) return;
+
+    setLoadingResubscribe(true);
+    try {
+      const res = await fetch("/api/reservations/waiting/resubscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ waitingId }),
+      });
+
+      const raw = await res.text();
+      let json: ResubscribeResponse;
+
+      try {
+        json = JSON.parse(raw) as ResubscribeResponse;
+      } catch {
+        alert(
+          `Respuesta no-JSON al reactivar aviso (${res.status}). Preview: ${safePreview(
+            raw,
+          )}`,
+        );
+        return;
+      }
+
+      if (!res.ok || !json.ok) {
+        alert(json.ok ? "Error" : json.error);
+        return;
+      }
+
+      // ✅ El usuario ya ha dicho “avísame de nuevo”.
+      // Dejamos el mensaje para que no intente claimar ahora mismo.
+      alert("Perfecto. Te avisaremos de nuevo si se liberan plazas.");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Error reactivando aviso";
+      alert(msg);
+    } finally {
+      setLoadingResubscribe(false);
     }
   }
 
@@ -160,7 +237,6 @@ export default function BookPage() {
 
     setLoadingComplete(true);
     try {
-      // 1) Guardamos detalles en el HOLD
       const res = await fetch("/api/reservations/hold/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -190,7 +266,6 @@ export default function BookPage() {
         return;
       }
 
-      // 2) Crear checkout de Stripe (API server-side) y redirigir
       const payRes = await fetch("/api/payments/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -205,7 +280,9 @@ export default function BookPage() {
         payJson = JSON.parse(payRaw) as CheckoutResponse;
       } catch {
         alert(
-          `Respuesta no-JSON al iniciar pago (${payRes.status}). Preview: ${safePreview(payRaw)}`,
+          `Respuesta no-JSON al iniciar pago (${payRes.status}). Preview: ${safePreview(
+            payRaw,
+          )}`,
         );
         return;
       }
@@ -224,7 +301,6 @@ export default function BookPage() {
         return;
       }
 
-      // ✅ redirect a Stripe
       window.location.href = payJson.checkoutUrl;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Error completando reserva";
@@ -283,7 +359,31 @@ export default function BookPage() {
         </p>
       </div>
 
-      {step === "pre" && (
+      {/* ✅ Si no hay plazas, mostramos directamente el “Ups…” */}
+      {showUps ? (
+        <div className="mt-6 rounded-xl border p-4">
+          <p className="font-medium">Ups… alguien se te ha adelantado.</p>
+          <p className="mt-2 text-sm text-gray-600">
+            Ahora mismo no quedan plazas suficientes para tu grupo. ¿Quieres que
+            te volvamos a avisar si se liberan plazas?
+          </p>
+
+          <button
+            disabled={loadingResubscribe}
+            onClick={onResubscribe}
+            className="mt-4 w-full rounded-md bg-black px-4 py-2 text-white disabled:opacity-50"
+          >
+            {loadingResubscribe ? "Activando aviso…" : "Avísame de nuevo"}
+          </button>
+
+          <button
+            onClick={() => setShowUps(false)}
+            className="mt-2 w-full rounded-md border px-4 py-2"
+          >
+            No, gracias
+          </button>
+        </div>
+      ) : step === "pre" ? (
         <div className="mt-6">
           <button
             disabled={loadingClaim || !info.canClaimNow}
@@ -305,9 +405,7 @@ export default function BookPage() {
             grupo (HOLD). Si alguien se adelanta, te avisaremos.
           </p>
         </div>
-      )}
-
-      {step === "details" && (
+      ) : (
         <div className="mt-6 space-y-3">
           <label className="block">
             <span className="text-sm text-gray-700">Nombre</span>

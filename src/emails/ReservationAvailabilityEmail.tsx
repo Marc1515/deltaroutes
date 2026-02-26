@@ -1,3 +1,4 @@
+// src/emails/ReservationAvailabilityEmail.tsx
 import * as React from "react";
 import {
   Html,
@@ -8,6 +9,7 @@ import {
   Section,
   Text,
   Hr,
+  Link,
 } from "@react-email/components";
 import { Tailwind } from "@react-email/tailwind";
 
@@ -22,6 +24,9 @@ type Props = {
   totalPax: number;
 
   actionUrl: string;
+
+  // opcional (si luego quieres añadirlo): minutos de hold / fecha límite
+  // deadlineText?: string;
 };
 
 export default function ReservationAvailabilityEmail({
@@ -42,7 +47,10 @@ export default function ReservationAvailabilityEmail({
   return (
     <Html>
       <Head />
-      <Preview>¡Ya hay plazas disponibles!</Preview>
+      {/* Preview más “operativo” */}
+      <Preview>
+        Acción requerida: reserva disponible ({reservationCode})
+      </Preview>
 
       <Body style={{ backgroundColor: "#f6f9fc", margin: 0, padding: 0 }}>
         <Tailwind>
@@ -54,8 +62,9 @@ export default function ReservationAvailabilityEmail({
 
               <Text className="text-slate-700">Hola {customerName},</Text>
 
+              {/* Sin emojis / sin “buenas noticias” */}
               <Text className="text-slate-700">
-                ✅ ¡Buenas noticias! Ya hay plazas suficientes para tu grupo en{" "}
+                Tu reserva en lista de espera ya puede completarse para{" "}
                 <span className="font-semibold">{activityLabel}</span>.
               </Text>
 
@@ -73,21 +82,26 @@ export default function ReservationAvailabilityEmail({
                 </Text>
               </Section>
 
+              {/* CTA menos “marketing” */}
               <Text className="mt-6 text-slate-700">
-                Para reservar, entra aquí:
+                Para continuar con la reserva:
               </Text>
 
               <Text className="text-slate-700">
-                <a href={actionUrl} className="text-blue-600 underline">
-                  {actionUrl}
-                </a>
+                <Link href={actionUrl} className="text-blue-600 underline">
+                  Abrir reserva
+                </Link>
               </Text>
+
+              {/* Si quieres, también puedes incluir el link completo pero en texto gris pequeño,
+                  aunque mejor evitarlo si quieres reducir Promociones */}
+              {/* <Text className="text-xs text-slate-400 break-all">{actionUrl}</Text> */}
 
               <Hr className="my-6 border-slate-200" />
 
               <Text className="text-xs text-slate-400">
-                Nota: las plazas pueden volver a agotarse si otras personas
-                reservan antes.
+                Nota: la disponibilidad puede cambiar si otras personas reservan
+                antes.
               </Text>
             </Section>
           </Container>

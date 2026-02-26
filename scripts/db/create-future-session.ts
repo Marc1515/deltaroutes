@@ -4,7 +4,6 @@ import { prisma } from "../../src/lib/prisma";
 function addHours(date: Date, hours: number) {
     return new Date(date.getTime() + hours * 60 * 60 * 1000);
 }
-
 function addMinutes(date: Date, minutes: number) {
     return new Date(date.getTime() + minutes * 60 * 1000);
 }
@@ -29,19 +28,20 @@ async function main() {
         0,
     );
 
-    // ✅ Para que SIEMPRE sea único:
-    // añadimos un offset de minutos (0..59) según el minuto actual,
-    // y además lo forzamos a un múltiplo de 5 para que quede “bonito”
-    const offset = Math.floor(now.getMinutes() / 5) * 5;
-    const startAt = addMinutes(baseStartAt, offset);
+    // ✅ Unicidad fuerte:
+    // - offset aleatorio en minutos (0..719 => hasta +12h)
+    // - segundos aleatorios (0..59) para evitar colisiones incluso si se repite el minuto
+    const offsetMinutes = Math.floor(Math.random() * 720);
+    const offsetSeconds = Math.floor(Math.random() * 60);
+
+    const startAt = addMinutes(baseStartAt, offsetMinutes);
+    startAt.setSeconds(offsetSeconds, 0);
 
     const bookingClosesAt = addHours(startAt, -4);
 
-    // Defaults de demo
     const adultPriceCents = 5000;
     const minorPriceCents = 2500;
 
-    // Defaults para tests
     const maxSeatsTotal = 5;
     const maxPerGuide = 6;
 

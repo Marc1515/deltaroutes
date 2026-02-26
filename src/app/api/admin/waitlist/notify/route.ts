@@ -1,4 +1,3 @@
-// src/app/api/admin/waitlist/notify/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { ReservationStatus } from "@/generated/prisma";
@@ -13,6 +12,8 @@ const madridFormatter = new Intl.DateTimeFormat("es-ES", {
     timeStyle: "short",
 });
 
+type Body = { sessionId?: string };
+
 export async function POST(req: Request) {
     const adminSecret = process.env.ADMIN_WAITLIST_SECRET;
     const headerSecret = req.headers.get("x-admin-secret");
@@ -20,7 +21,7 @@ export async function POST(req: Request) {
     if (!adminSecret) {
         return NextResponse.json(
             { ok: false, error: "Missing ADMIN_WAITLIST_SECRET" },
-            { status: 500 }
+            { status: 500 },
         );
     }
 
@@ -28,16 +29,15 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
 
+    const body = (await req.json().catch(() => ({}))) as Body;
+    const filterSessionId = body.sessionId?.trim();
+
     const now = new Date();
     const appUrl = process.env.APP_URL ?? "http://localhost:3000";
 
-    /**
-     * 1) Sesiones futuras/no canceladas que:
-     * - todavía permiten reservar (bookingClosesAt > now)
-     * - tienen WAITING pendientes a los que aún no se les avisó
-     */
     const sessions = await prisma.session.findMany({
         where: {
+            ...(filterSessionId ? { id: filterSessionId } : {}),
             isCancelled: false,
             startAt: { gt: now },
             bookingClosesAt: { gt: now },
@@ -61,12 +61,10 @@ export async function POST(req: Request) {
     let notified = 0;
     let considered = 0;
 
+    // Debug opcional
+    const sent: Array<{ waitingId: string; to: string; actionUrl: string; sessionId: string }> = [];
+
     for (const session of sessions) {
-        /**
-         * 2) Plazas ocupadas reales:
-         * - CONFIRMED
-         * - HOLD activo (holdExpiresAt > now)
-         */
         const reservedAgg = await prisma.reservation.aggregate({
             where: {
                 sessionId: session.id,
@@ -80,13 +78,8 @@ export async function POST(req: Request) {
 
         const reservedSeats = reservedAgg._sum.totalPax ?? 0;
         let freeSeats = Math.max(0, session.maxSeatsTotal - reservedSeats);
-
         if (freeSeats <= 0) continue;
 
-        /**
-         * 3) WAITING pendientes en orden de llegada.
-         * Avisamos a los que "quepan" en las plazas libres actuales.
-         */
         const waiting = await prisma.reservation.findMany({
             where: {
                 sessionId: session.id,
@@ -101,10 +94,8 @@ export async function POST(req: Request) {
         for (const r of waiting) {
             considered++;
 
-            // Si todavía no caben, pasamos al siguiente (más pequeño podría caber)
             if (freeSeats < r.totalPax) continue;
 
-            // Marcamos primero para idempotencia (si llamas 2 veces notify)
             const mark = await prisma.reservation.updateMany({
                 where: { id: r.id, availabilityEmailSentAt: { equals: null } },
                 data: { availabilityEmailSentAt: new Date() },
@@ -113,47 +104,44 @@ export async function POST(req: Request) {
             if (mark.count !== 1) continue;
 
             const toEmail = r.customer.email;
-            if (!toEmail) {
-                // Si algún día permites customer.email nullable, evitamos crash y seguimos.
-                continue;
-            }
+            if (!toEmail) continue;
 
             const reservationCode = `DR-${r.id.slice(0, 8).toUpperCase()}`;
             const activityLabel = session.experience.title;
             const startText = madridFormatter.format(session.startAt);
-
-            /**
-             * Link hacia tu UI (/book).
-             * Importante:
-             * - NO convertimos a HOLD al abrir el link (evita previews/bots consumiendo plazas).
-             * - La UI mostrará un CTA "Reservar ahora" y entonces llamará a una API para
-             *   convertir WAITING -> HOLD de forma controlada.
-             *
-             * Por eso el identificador real es waitingId.
-             */
             const actionUrl = `${appUrl}/book?waitingId=${encodeURIComponent(r.id)}`;
 
+            try {
+                await sendEmail({
+                    to: toEmail,
+                    subject: `DeltaRoutes: acción requerida (${reservationCode})`,
+                    replyTo: process.env.EMAIL_REPLY_TO,
+                    react: ReservationAvailabilityEmail({
+                        customerName: r.customer.name ?? "Cliente",
+                        activityLabel,
+                        startText,
+                        reservationCode,
+                        adultsCount: r.adultsCount,
+                        minorsCount: r.minorsCount,
+                        totalPax: r.totalPax,
+                        actionUrl,
+                    }),
+                });
 
-            await sendEmail({
-                to: toEmail,
-                subject: `DeltaRoutes · Ya hay plazas (${reservationCode})`,
-                react: ReservationAvailabilityEmail({
-                    customerName: r.customer.name ?? "Cliente",
-                    activityLabel,
-                    startText,
-                    reservationCode,
-                    adultsCount: r.adultsCount,
-                    minorsCount: r.minorsCount,
-                    totalPax: r.totalPax,
-                    actionUrl,
-                }),
-            });
+                sent.push({ waitingId: r.id, to: toEmail, actionUrl, sessionId: session.id });
 
-            notified++;
-            freeSeats -= r.totalPax;
+                notified++;
+                freeSeats -= r.totalPax;
 
-            // No avisamos a más gente de la que cabe ahora mismo
-            if (freeSeats <= 0) break;
+                if (freeSeats <= 0) break;
+            } catch (e) {
+                console.warn("[waitlist/notify] sendEmail failed:", e);
+                // revertimos para reintentar
+                await prisma.reservation.update({
+                    where: { id: r.id },
+                    data: { availabilityEmailSentAt: null },
+                });
+            }
         }
     }
 
@@ -162,5 +150,6 @@ export async function POST(req: Request) {
         sessionsChecked: sessions.length,
         considered,
         notified,
+        sent,
     });
 }
