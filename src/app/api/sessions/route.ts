@@ -7,6 +7,7 @@ export const runtime = "nodejs";
 type SessionAvailability = {
     id: string;
     experienceId: string;
+    name: string | null;
     startAt: string;
     bookingClosesAt: string;
     maxSeatsTotal: number;
@@ -46,6 +47,7 @@ export async function GET(req: Request) {
         select: {
             id: true,
             experienceId: true,
+            name: true,
             startAt: true,
             bookingClosesAt: true,
             maxSeatsTotal: true,
@@ -88,6 +90,7 @@ export async function GET(req: Request) {
         return {
             id: s.id,
             experienceId: s.experienceId,
+            name: s.name,
             startAt: s.startAt.toISOString(),
             bookingClosesAt: s.bookingClosesAt.toISOString(),
             maxSeatsTotal: s.maxSeatsTotal,

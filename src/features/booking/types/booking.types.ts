@@ -3,6 +3,7 @@ import type { LanguageBase } from "@/generated/prisma";
 export type SessionAvailability = {
     id: string;
     experienceId: string;
+    name: string | null;
     startAt: string;
     bookingClosesAt: string;
     maxSeatsTotal: number;

@@ -184,6 +184,11 @@ export function BookingModal(props: {
                 <div key={s.id} className="rounded-2xl border p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>
+                      {s.name && (
+                        <div className="text-xs font-semibold uppercase tracking-wide opacity-60">
+                          {s.name}
+                        </div>
+                      )}
                       <div className="font-semibold">
                         {formatDate(s.startAt)}
                       </div>
