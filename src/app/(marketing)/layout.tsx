@@ -1,3 +1,5 @@
+import { MobileNavbar } from "./MobileNavbar";
+
 export default function MarketingLayout({
   children,
 }: {
@@ -5,9 +7,8 @@ export default function MarketingLayout({
 }) {
   return (
     <>
-      {/* aquí tu header/landing layout si quieres */}
+      <MobileNavbar />
       {children}
-      {/* aquí tu footer */}
     </>
   );
 }
