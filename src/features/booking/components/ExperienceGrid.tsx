@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import type { ExperienceCard } from "@/config/experiences";
 
 export function ExperienceGrid(props: {
@@ -12,12 +13,25 @@ export function ExperienceGrid(props: {
         <button
           key={exp.key}
           onClick={() => props.onSelect(exp)}
-          className="rounded-2xl border p-6 text-left shadow-sm hover:shadow-md transition"
+          className="rounded-2xl border text-left shadow-sm hover:shadow-md transition overflow-hidden"
         >
-          <div className="text-lg font-semibold">{exp.title}</div>
-          <div className="mt-1 text-sm opacity-80">{exp.subtitle}</div>
-          <div className="mt-4 inline-flex rounded-xl border px-3 py-1 text-sm">
-            Reservar
+          <div className="relative h-40 w-full">
+            <Image
+              src={exp.imageSrc}
+              alt={exp.imageAlt}
+              fill
+              className="object-cover"
+              sizes="(max-width: 640px) 100vw, 50vw"
+              priority
+            />
+          </div>
+
+          <div className="p-6">
+            <div className="text-lg font-semibold">{exp.title}</div>
+            <div className="mt-1 text-sm opacity-80">{exp.subtitle}</div>
+            <div className="mt-4 inline-flex rounded-xl border px-3 py-1 text-sm">
+              Reservar
+            </div>
           </div>
         </button>
       ))}
