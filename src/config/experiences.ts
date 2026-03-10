@@ -24,7 +24,7 @@ export const EXPERIENCES: ExperienceCard[] = [
         title: "Ruta en bici",
         subtitle: "Más distancia, mismas vistas.",
         experienceId: "cmlscl01o000668vf0ruu12eo",
-        imageSrc: "/img/cycling.jpg",
+        imageSrc: "/img/cycling2.jpg",
         imageAlt: "Ruta en bicicleta por caminos del delta",
     },
     {
@@ -32,7 +32,7 @@ export const EXPERIENCES: ExperienceCard[] = [
         title: "Ruta en kayak",
         subtitle: "Una experiencia en el agua.",
         experienceId: "cmlscl01w000768vfxbqw5jod",
-        imageSrc: "/img/kayak.jpg",
+        imageSrc: "/img/kayak2.jpg",
         imageAlt: "Personas en kayak navegando por el agua",
     },
     {
@@ -40,7 +40,7 @@ export const EXPERIENCES: ExperienceCard[] = [
         title: "Mini-crucero",
         subtitle: "Relájate y disfruta.",
         experienceId: "cmlscl028000968vf91lkuvg5",
-        imageSrc: "/img/cruise.jpg",
+        imageSrc: "/img/cruise2.jpg",
         imageAlt: "Barco de crucero navegando por el delta",
     },
 ];

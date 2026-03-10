@@ -13,24 +13,30 @@ export function ExperienceGrid(props: {
         <button
           key={exp.key}
           onClick={() => props.onSelect(exp)}
-          className="rounded-2xl border text-left shadow-sm hover:shadow-md transition overflow-hidden"
+          className="relative h-48 w-full overflow-hidden rounded-2xl border text-left shadow-sm hover:shadow-md transition"
         >
-          <div className="relative h-40 w-full">
-            <Image
-              src={exp.imageSrc}
-              alt={exp.imageAlt}
-              fill
-              className="object-cover"
-              sizes="(max-width: 640px) 100vw, 50vw"
-              priority
-            />
-          </div>
+          <Image
+            src={exp.imageSrc}
+            alt={exp.imageAlt}
+            fill
+            className="object-cover"
+            sizes="(max-width: 640px) 100vw, 50vw"
+            priority
+          />
 
-          <div className="p-6">
-            <div className="text-lg font-semibold">{exp.title}</div>
-            <div className="mt-1 text-sm opacity-80">{exp.subtitle}</div>
-            <div className="mt-4 inline-flex rounded-xl border px-3 py-1 text-sm">
-              Reservar
+          <div className="pointer-events-none absolute inset-0 bg-linear-to-t from-black/70 via-black/20 to-black/0" />
+
+          <div className="pointer-events-none absolute inset-0 flex items-end">
+            <div className="p-4 text-white">
+              <div className="text-lg font-semibold drop-shadow">
+                {exp.title}
+              </div>
+              <div className="mt-1 text-sm opacity-90 drop-shadow">
+                {exp.subtitle}
+              </div>
+              <div className="mt-3 inline-flex rounded-xl border border-white/70 bg-white/10 px-3 py-1 text-sm backdrop-blur-sm">
+                Reservar
+              </div>
             </div>
           </div>
         </button>
