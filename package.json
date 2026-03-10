@@ -14,7 +14,8 @@
     "db:show-session": "tsx scripts/db/show-session.ts",
     "db:cleanup-holds": "tsx scripts/db/cleanup-holds.ts",
     "db:force-expire-holds": "tsx scripts/db/force-expire-holds.ts",
-    "db:create-future-session": "tsx scripts/db/create-future-session.ts"
+    "db:create-future-session": "tsx scripts/db/create-future-session.ts",
+    "db:delete-sessions": "tsx scripts/db/delete-sessions.ts"
   },
   "dependencies": {
     "@prisma/client": "^7.2.0",
