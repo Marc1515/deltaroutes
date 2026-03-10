@@ -2,6 +2,42 @@
 import { ExperienceType, UserRole, LanguageCode } from "../src/generated/prisma";
 import { prisma } from "../src/lib/prisma";
 
+const SESSION_NAME_WORDS = [
+  "arrozales",
+  "miradores",
+  "delta",
+  "rio",
+  "atardecer",
+  "amanecer",
+  "fauna",
+  "naturaleza",
+  "senderos",
+  "crucero",
+  "kayak",
+  "bicicleta",
+  "familias",
+  "aventura",
+  "tranquilo",
+  "panoramicas",
+  "playas",
+  "estuario",
+  "lagunas",
+  "puesta",
+  "sol",
+  "rioEbro",
+];
+
+function randomSessionName() {
+  const wordsCount = 4 + Math.floor(Math.random() * 5); // 4..8
+  const words: string[] = [];
+  for (let i = 0; i < wordsCount; i++) {
+    const index = Math.floor(Math.random() * SESSION_NAME_WORDS.length);
+    words.push(SESSION_NAME_WORDS[index]);
+  }
+  const raw = words.join(" ");
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
 function addDays(base: Date, days: number) {
   const d = new Date(base);
   d.setDate(d.getDate() + days);
@@ -184,7 +220,7 @@ async function main() {
       const adultPriceCents = isMiniCruise ? 2500 : isKayak ? 3500 : 5000;
       const minorPriceCents = isMiniCruise ? 2500 : 2500;
 
-      const sessionData = {
+      const baseSessionData = {
         experienceId: exp.id,
         startAt,
         endAt,
@@ -208,10 +244,15 @@ async function main() {
       if (existing) {
         await prisma.session.update({
           where: { id: existing.id },
-          data: sessionData,
+          data: baseSessionData,
         });
       } else {
-        await prisma.session.create({ data: sessionData });
+        await prisma.session.create({
+          data: {
+            ...baseSessionData,
+            name: randomSessionName(),
+          },
+        });
       }
     }
   }

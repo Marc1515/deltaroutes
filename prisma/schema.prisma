@@ -141,6 +141,8 @@ model Experience {
 model Session {
   id           String   @id @default(cuid())
   experienceId String
+  // Nombre corto y aleatorio para identificar la sesión (opcional)
+  name         String?
   startAt      DateTime
   endAt        DateTime?
   meetingPoint String

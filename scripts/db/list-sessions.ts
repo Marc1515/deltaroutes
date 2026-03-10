@@ -3,7 +3,7 @@ import { prisma } from "../../src/lib/prisma";
 
 async function main() {
     const sessions = await prisma.session.findMany({
-        take: 20,
+        take: 100,
         orderBy: { startAt: "asc" },
         include: { experience: { select: { title: true, type: true } } },
     });
