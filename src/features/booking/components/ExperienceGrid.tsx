@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import type { ExperienceCard } from "@/config/experiences";
 
@@ -7,13 +8,45 @@ export function ExperienceGrid(props: {
   experiences: ExperienceCard[];
   onSelect: (exp: ExperienceCard) => void;
 }) {
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const node = gridRef.current;
+
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+
+        setIsVisible(true);
+        observer.disconnect();
+      },
+      { threshold: 0.15 },
+    );
+
+    observer.observe(node);
+
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      {props.experiences.map((exp) => (
+    <div ref={gridRef} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {props.experiences.map((exp, index) => (
         <button
           key={exp.key}
           onClick={() => props.onSelect(exp)}
-          className="relative h-48 w-full overflow-hidden rounded-2xl border text-left shadow-sm hover:shadow-md transition"
+          className="experience-card-reveal relative h-48 w-full overflow-hidden rounded-2xl border text-left shadow-sm transition hover:shadow-md"
+          style={
+            isVisible
+              ? {
+                  animation: `experience-card-reveal 950ms cubic-bezier(0.22, 1, 0.36, 1) ${
+                    index * 180
+                  }ms both`,
+                }
+              : undefined
+          }
         >
           <Image
             src={exp.imageSrc}
