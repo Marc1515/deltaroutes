@@ -73,8 +73,8 @@ export function BookingModal(props: {
   if (!props.open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
-      <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-lg">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-xl rounded-2xl bg-black text-white p-5 shadow-lg">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-sm opacity-70">Reserva</div>
@@ -107,7 +107,7 @@ export function BookingModal(props: {
 
         {/* STEP 1 */}
         {step === 1 && (
-          <div className="mt-4 space-y-3 text-slate-900">
+          <div className="mt-4 space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <label className="text-sm">
                 Adultos (mín. 1)
