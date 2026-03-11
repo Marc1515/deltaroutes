@@ -20,6 +20,17 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Environment Variables
+
+Use `.env.example` as the reference contract for local and deployed environments.
+
+For outbound email and the contact form, configure at least these values:
+
+- `RESEND_API_KEY`: API key used to deliver transactional emails.
+- `EMAIL_FROM`: sender identity used by `sendEmail()`.
+- `CONTACT_EMAIL_TO`: inbox that receives submissions from `/api/contact`.
+- `CONTACT_EMAIL_SUBJECT_PREFIX`: optional prefix for contact email subjects. Defaults to `DeltaRoutes · Contacto` when omitted.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

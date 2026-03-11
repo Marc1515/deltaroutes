@@ -92,7 +92,7 @@ export function HomeSection() {
     >
       <div className="flex min-h-screen w-full flex-col justify-between px-4 pt-20 pb-10 text-center">
         <h1
-          className="sticky top-10 text-3xl font-semibold text-white drop-shadow transition-opacity duration-300"
+          className="sticky top-20 text-3xl font-semibold text-white drop-shadow transition-opacity duration-300"
           style={{ opacity: homeTitleOpacity }}
         >
           DeltaRoutes
