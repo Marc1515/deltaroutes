@@ -26,5 +26,9 @@ export async function sendEmail({ to, subject, react, replyTo }: SendEmailArgs) 
         ...(replyTo ? { replyTo } : {}),
     });
 
+    if (result.error) {
+        throw new Error(`Resend rejected email: ${result.error.message}`);
+    }
+
     return result;
 }

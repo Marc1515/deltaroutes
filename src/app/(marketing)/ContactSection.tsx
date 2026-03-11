@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import {
   CONTACT_INQUIRY_TYPES,
   type ContactApiResponse,
@@ -74,8 +74,45 @@ const initialFormState: ContactFormPayload = {
   website: "",
 };
 
+const CONTACT_FORM_STORAGE_KEY = "deltaroutes.contact-form";
+const inquiryTypeSet = new Set<ContactInquiryType>(CONTACT_INQUIRY_TYPES);
+
+function restoreStoredFormData(value: string | null): ContactFormPayload | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<ContactFormPayload>;
+    const inquiryType = parsed.inquiryType;
+
+    return {
+      name: typeof parsed.name === "string" ? parsed.name : initialFormState.name,
+      email: typeof parsed.email === "string" ? parsed.email : initialFormState.email,
+      phone: typeof parsed.phone === "string" ? parsed.phone : initialFormState.phone,
+      inquiryType:
+        typeof inquiryType === "string" && inquiryTypeSet.has(inquiryType as ContactInquiryType)
+          ? (inquiryType as ContactInquiryType)
+          : initialFormState.inquiryType,
+      groupSize:
+        typeof parsed.groupSize === "string" ? parsed.groupSize : initialFormState.groupSize,
+      preferredDates:
+        typeof parsed.preferredDates === "string"
+          ? parsed.preferredDates
+          : initialFormState.preferredDates,
+      message: typeof parsed.message === "string" ? parsed.message : initialFormState.message,
+      website: typeof parsed.website === "string" ? parsed.website : initialFormState.website,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function ContactSection() {
+  const sectionRef = useRef<HTMLElement | null>(null);
   const [formData, setFormData] = useState<ContactFormPayload>(initialFormState);
+  const hasLoadedStoredDraftRef = useRef(false);
+  const [areContactCardsVisible, setAreContactCardsVisible] = useState(false);
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">(
     "idle",
   );
@@ -86,11 +123,71 @@ export function ContactSection() {
 
   const showPlanningFields = formData.inquiryType !== "question";
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const restoredFormData = restoreStoredFormData(
+        window.localStorage.getItem(CONTACT_FORM_STORAGE_KEY),
+      );
+
+      if (restoredFormData) {
+        setFormData(restoredFormData);
+      }
+
+      hasLoadedStoredDraftRef.current = true;
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedStoredDraftRef.current) {
+      return;
+    }
+
+    window.localStorage.setItem(CONTACT_FORM_STORAGE_KEY, JSON.stringify(formData));
+  }, [formData]);
+
+  useEffect(() => {
+    const node = sectionRef.current;
+
+    if (!node) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) {
+          return;
+        }
+
+        setAreContactCardsVisible(true);
+        observer.disconnect();
+      },
+      { threshold: 0.15 },
+    );
+
+    observer.observe(node);
+
+    return () => observer.disconnect();
+  }, []);
+
+  function getRevealStyle(index: number) {
+    return areContactCardsVisible
+      ? {
+          animation: `experience-card-reveal 950ms cubic-bezier(0.22, 1, 0.36, 1) ${
+            index * 180
+          }ms both`,
+        }
+      : undefined;
+  }
+
   function updateField<K extends keyof ContactFormPayload>(
     field: K,
     value: ContactFormPayload[K],
   ) {
     setFormData((current) => ({ ...current, [field]: value }));
+    setStatus("idle");
+    setFeedbackMessage("");
     setFieldErrors((current) => ({ ...current, [field]: undefined }));
   }
 
@@ -129,6 +226,7 @@ export function ContactSection() {
 
       setStatus("success");
       setFeedbackMessage(json.message);
+      window.localStorage.removeItem(CONTACT_FORM_STORAGE_KEY);
       setFormData(initialFormState);
     } catch {
       setStatus("error");
@@ -148,12 +246,16 @@ export function ContactSection() {
 
   return (
     <section
+      ref={sectionRef}
       className="relative z-10 min-h-screen w-full bg-black text-white"
       id="contact"
       aria-label="Contacto"
     >
       <div className="mx-auto max-w-5xl px-4 py-12 sm:py-16">
-        <div className="max-w-2xl">
+        <div
+          className="experience-card-reveal max-w-2xl"
+          style={getRevealStyle(0)}
+        >
           <h2 className="text-2xl font-semibold sm:text-3xl">Contacto</h2>
           <p className="mt-4 text-sm leading-7 text-white/75 sm:text-base">
             Si todavía no sabes qué experiencia encaja mejor contigo, viajas en
@@ -164,7 +266,10 @@ export function ContactSection() {
 
         <div className="mt-10 grid gap-6 lg:grid-cols-[1fr_1.05fr]">
           <div className="space-y-6">
-            <div className="rounded-4xl border border-white/10 bg-white/3 p-6">
+            <div
+              className="experience-card-reveal rounded-4xl border border-white/10 bg-white/3 p-6"
+              style={getRevealStyle(1)}
+            >
               <h3 className="text-lg font-medium">Canales directos</h3>
               <p className="mt-3 text-sm leading-6 text-white/70">
                 Si prefieres escribirnos directamente, respondemos por email y
@@ -202,7 +307,10 @@ export function ContactSection() {
               </div>
             </div>
 
-            <div className="rounded-4xl border border-white/10 bg-white/3 p-6">
+            <div
+              className="experience-card-reveal rounded-4xl border border-white/10 bg-white/3 p-6"
+              style={getRevealStyle(2)}
+            >
               <h3 className="text-lg font-medium">Así funciona la reserva</h3>
               <ol className="mt-5 space-y-4">
                 <li className="flex gap-4">
@@ -246,7 +354,10 @@ export function ContactSection() {
             </div>
           </div>
 
-          <div className="rounded-4xl border border-white/10 bg-white/4 p-6 sm:p-7">
+          <div
+            className="experience-card-reveal rounded-4xl border border-white/10 bg-white/4 p-6 sm:p-7"
+            style={getRevealStyle(3)}
+          >
             <div className="max-w-xl">
               <h3 className="text-lg font-medium">Cuéntanos qué necesitas</h3>
               <p className="mt-3 text-sm leading-6 text-white/70">
