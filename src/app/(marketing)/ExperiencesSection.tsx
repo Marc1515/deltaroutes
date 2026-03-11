@@ -12,7 +12,7 @@ export function ExperiencesSection({
 }: ExperiencesSectionProps) {
   return (
     <section
-      className="min-h-screen w-full"
+      className="min-h-screen w-full bg-black text-white"
       id="experiences"
       aria-label="Experiencias disponibles"
     >

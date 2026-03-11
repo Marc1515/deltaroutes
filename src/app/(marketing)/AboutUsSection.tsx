@@ -64,13 +64,13 @@ export function AboutUsSection() {
 
   return (
     <section
-      className="min-h-screen w-full"
-      id="about-us"
+      className="min-h-screen w-full bg-black"
       aria-label="Sobre DeltaRoutes"
     >
       <div
         ref={firstPanelRef}
-        className="relative mx-auto min-h-screen w-full max-w-5xl bg-fixed bg-cover bg-center bg-no-repeat px-4 py-10 text-white"
+        id="about-us"
+        className="relative mx-auto min-h-screen w-full max-w-5xl bg-cover bg-center bg-no-repeat px-4 py-10 text-white md:bg-fixed"
         style={{ backgroundImage: 'url("/img/aboutUs4.png")' }}
       >
         <div
