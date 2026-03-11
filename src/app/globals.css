@@ -25,6 +25,38 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+.app-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.603);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+}
+
+.app-loading-spinner {
+  width: 64px;
+  height: 64px;
+  border: 5px solid rgb(255 255 255 / 0.45);
+  border-top-color: #171717;
+  border-radius: 9999px;
+  animation: app-loading-spin 0.9s linear infinite;
+  box-shadow: 0 10px 30px rgb(23 23 23 / 0.12);
+}
+
+@keyframes app-loading-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .home-hero {
   min-height: 100vh;
   width: 100%;
@@ -60,4 +92,3 @@ body {
     animation: none !important;
   }
 }
-
