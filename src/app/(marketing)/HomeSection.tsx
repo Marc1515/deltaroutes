@@ -86,11 +86,11 @@ export function HomeSection() {
   return (
     <section
       id="home"
-      className="min-h-screen w-full bg-cover bg-center bg-fixed"
+      className="min-h-screen w-full bg-cover bg-center bg-fixed bg-no-repeat"
       style={{ backgroundImage: 'url("/img/home.jpg")' }}
       aria-label="Inicio"
     >
-      <div className="flex min-h-screen w-full text-center flex-col justify-between px-4 pt-20 pb-10">
+      <div className="flex min-h-screen w-full flex-col justify-between px-4 pt-20 pb-10 text-center">
         <h1
           className="sticky top-10 text-3xl font-semibold text-white drop-shadow transition-opacity duration-300"
           style={{ opacity: homeTitleOpacity }}
