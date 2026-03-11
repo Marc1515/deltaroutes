@@ -62,7 +62,7 @@ export function MobileNavbar() {
         }`}
       >
         <nav
-          className={`absolute right-0 top-0 h-full w-64 bg-white text-black px-6 py-10 shadow-xl transition-transform duration-200 ${
+          className={`absolute right-0 top-0 h-full w-64 bg-black text-white px-6 py-10 shadow-xl transition-transform duration-200 ${
             open ? "translate-x-0" : "translate-x-full"
           }`}
         >
