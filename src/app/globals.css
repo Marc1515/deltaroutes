@@ -39,7 +39,7 @@ body {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: rgba(10, 10, 10, 0.925);
+  background: rgba(10, 10, 10, 0.61);
   opacity: 1;
   transition:
     opacity 650ms cubic-bezier(0.22, 1, 0.36, 1),
