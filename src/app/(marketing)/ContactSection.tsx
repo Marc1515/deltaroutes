@@ -1,6 +1,10 @@
 export function ContactSection() {
   return (
-    <section className="min-h-screen w-full" id="contact" aria-label="Contacto">
+    <section
+      className="relative z-10 min-h-screen w-full bg-black"
+      id="contact"
+      aria-label="Contacto"
+    >
       <div className="mx-auto max-w-5xl px-4 py-10">
         <h2 className="text-2xl font-semibold">Contacto</h2>
         <p className="mt-4 opacity-80">

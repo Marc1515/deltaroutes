@@ -6,7 +6,6 @@ import { BookingModal } from "@/features/booking/components/BookingModal";
 import { HomeSection } from "./HomeSection";
 import { ExperiencesSection } from "./ExperiencesSection";
 import { AboutUsSection } from "./AboutUsSection";
-import { ContactSection } from "./ContactSection";
 
 export function HomeClient() {
   const [open, setOpen] = useState(false);
@@ -25,7 +24,6 @@ export function HomeClient() {
       />
 
       <AboutUsSection />
-      <ContactSection />
 
       <BookingModal
         open={open}
