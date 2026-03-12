@@ -4,11 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import type { ExperienceCard } from "@/config/experiences";
 
+const MOBILE_BREAKPOINT = 639;
+const MOBILE_MODAL_DELAY_MS = 450;
+
 export function ExperienceGrid(props: {
   experiences: ExperienceCard[];
   onSelect: (exp: ExperienceCard) => void;
 }) {
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const openTimeoutRef = useRef<number | null>(null);
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
@@ -31,12 +35,44 @@ export function ExperienceGrid(props: {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (openTimeoutRef.current !== null) {
+        window.clearTimeout(openTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function handleSelect(exp: ExperienceCard, element: HTMLButtonElement | null) {
+    const isMobile = window.innerWidth <= MOBILE_BREAKPOINT;
+
+    if (!isMobile || !element) {
+      props.onSelect(exp);
+      return;
+    }
+
+    if (openTimeoutRef.current !== null) {
+      window.clearTimeout(openTimeoutRef.current);
+    }
+
+    element.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+      inline: "nearest",
+    });
+
+    openTimeoutRef.current = window.setTimeout(() => {
+      props.onSelect(exp);
+      openTimeoutRef.current = null;
+    }, MOBILE_MODAL_DELAY_MS);
+  }
+
   return (
     <div ref={gridRef} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       {props.experiences.map((exp, index) => (
         <button
           key={exp.key}
-          onClick={() => props.onSelect(exp)}
+          onClick={(event) => handleSelect(exp, event.currentTarget)}
           className="experience-card-reveal relative h-48 w-full overflow-hidden rounded-2xl border text-left shadow-sm transition hover:shadow-md"
           style={
             isVisible
