@@ -2,7 +2,13 @@
 import "dotenv/config";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Prisma, LanguageCode, ReservationStatus, PaymentStatus } from "@/generated/prisma";
+import {
+  Prisma,
+  LanguageCode,
+  ReservationStatus,
+  PaymentStatus,
+  ReservationCreatedEmailKind,
+} from "@/generated/prisma";
 import { HOLD_MINUTES } from "@/config/app";
 import type { CreateReservationBody, CreateReservationResponse } from "@/types/reservations.types";
 import { sendEmail } from "@/lib/email";
@@ -78,6 +84,69 @@ function isDuplicateReservationError(e: unknown): boolean {
 
 function canReuseReservationStatus(status: ReservationStatus) {
   return status === ReservationStatus.EXPIRED || status === ReservationStatus.CANCELLED;
+}
+
+function shouldPreserveCreatedEmail(args: {
+  createdEmailSentAt: Date | null;
+  createdEmailKind: ReservationCreatedEmailKind | null;
+  adultsCount: number;
+  minorsCount: number;
+  nextEmailKind: ReservationCreatedEmailKind;
+  nextAdultsCount: number;
+  nextMinorsCount: number;
+}) {
+  const {
+    createdEmailSentAt,
+    createdEmailKind,
+    adultsCount,
+    minorsCount,
+    nextEmailKind,
+    nextAdultsCount,
+    nextMinorsCount,
+  } = args;
+
+  return (
+    createdEmailSentAt !== null &&
+    createdEmailKind === nextEmailKind &&
+    adultsCount === nextAdultsCount &&
+    minorsCount === nextMinorsCount
+  );
+}
+
+function getCreatedEmailResetData(args: {
+  existingReservation:
+    | {
+        createdEmailSentAt: Date | null;
+        createdEmailKind: ReservationCreatedEmailKind | null;
+        adultsCount: number;
+        minorsCount: number;
+      }
+    | null;
+  nextEmailKind: ReservationCreatedEmailKind;
+  nextAdultsCount: number;
+  nextMinorsCount: number;
+}) {
+  const { existingReservation, nextEmailKind, nextAdultsCount, nextMinorsCount } = args;
+
+  if (
+    existingReservation &&
+    shouldPreserveCreatedEmail({
+      createdEmailSentAt: existingReservation.createdEmailSentAt,
+      createdEmailKind: existingReservation.createdEmailKind,
+      adultsCount: existingReservation.adultsCount,
+      minorsCount: existingReservation.minorsCount,
+      nextEmailKind,
+      nextAdultsCount,
+      nextMinorsCount,
+    })
+  ) {
+    return {};
+  }
+
+  return {
+    createdEmailSentAt: null,
+    createdEmailKind: null,
+  };
 }
 
 async function attemptCreateReservation(args: {
@@ -179,8 +248,12 @@ async function attemptCreateReservation(args: {
                 cancelledAt: null,
                 cancelReason: null,
                 refundAmountCents: 0,
-                createdEmailSentAt: null,
-                createdEmailKind: null,
+                ...getCreatedEmailResetData({
+                  existingReservation: reusableReservation,
+                  nextEmailKind: ReservationCreatedEmailKind.WAITING,
+                  nextAdultsCount: adultsCount,
+                  nextMinorsCount: minorsCount,
+                }),
               },
             })
           : await tx.reservation.create({
@@ -227,8 +300,12 @@ async function attemptCreateReservation(args: {
                 cancelledAt: null,
                 cancelReason: null,
                 refundAmountCents: 0,
-                createdEmailSentAt: null,
-                createdEmailKind: null,
+                ...getCreatedEmailResetData({
+                  existingReservation: reusableReservation,
+                  nextEmailKind: ReservationCreatedEmailKind.WAITING,
+                  nextAdultsCount: adultsCount,
+                  nextMinorsCount: minorsCount,
+                }),
               },
             })
           : await tx.reservation.create({
@@ -309,8 +386,12 @@ async function attemptCreateReservation(args: {
                 cancelledAt: null,
                 cancelReason: null,
                 refundAmountCents: 0,
-                createdEmailSentAt: null,
-                createdEmailKind: null,
+                ...getCreatedEmailResetData({
+                  existingReservation: reusableReservation,
+                  nextEmailKind: ReservationCreatedEmailKind.WAITING,
+                  nextAdultsCount: adultsCount,
+                  nextMinorsCount: minorsCount,
+                }),
               },
             })
           : await tx.reservation.create({
@@ -353,8 +434,12 @@ async function attemptCreateReservation(args: {
               cancelledAt: null,
               cancelReason: null,
               refundAmountCents: 0,
-              createdEmailSentAt: null,
-              createdEmailKind: null,
+              ...getCreatedEmailResetData({
+                existingReservation: reusableReservation,
+                nextEmailKind: ReservationCreatedEmailKind.HOLD,
+                nextAdultsCount: adultsCount,
+                nextMinorsCount: minorsCount,
+              }),
             },
           })
         : await tx.reservation.create({
