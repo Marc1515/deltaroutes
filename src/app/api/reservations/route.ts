@@ -2,7 +2,7 @@
 import "dotenv/config";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { LanguageCode, ReservationStatus, PaymentStatus } from "@/generated/prisma";
+import { Prisma, LanguageCode, ReservationStatus, PaymentStatus } from "@/generated/prisma";
 import { HOLD_MINUTES } from "@/config/app";
 import type { CreateReservationBody, CreateReservationResponse } from "@/types/reservations.types";
 import { sendEmail } from "@/lib/email";
@@ -60,42 +60,42 @@ function toInt(v: unknown): number {
   return Number.isFinite(n) ? Math.trunc(n) : NaN;
 }
 
-export async function POST(req: Request) {
-  /**
-   * Mantenemos el type actual (CreateReservationBody), pero el body real incluye pax.
-   * Lo leemos desde "raw" para no bloquearte por tipos mientras ajustas los types del front.
-   */
-  const raw = (await req.json()) as Record<string, unknown>;
-  const body = raw as CreateReservationBody;
+const MAX_SERIALIZABLE_RETRIES = 3;
 
-  // Pax (nuevo flujo)
-  const adultsCount = toInt(raw.adultsCount);
-  const minorsCount = toInt(raw.minorsCount);
+function addMinutes(d: Date, minutes: number) {
+  return new Date(d.getTime() + minutes * 60_000);
+}
 
-  if (!body.sessionId || !body.customerName || !body.customerEmail || !body.tourLanguage) {
-    return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-  }
+function isSerializationError(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  const msg = e.message.toLowerCase();
+  return msg.includes("serialization") || msg.includes("could not serialize");
+}
 
-  // Validación de pax: adultos >= 1, menores >= 0
-  if (!Number.isFinite(adultsCount) || adultsCount < 1) {
-    return NextResponse.json({ error: "adultsCount must be a number >= 1" }, { status: 400 });
-  }
-  if (!Number.isFinite(minorsCount) || minorsCount < 0) {
-    return NextResponse.json({ error: "minorsCount must be a number >= 0" }, { status: 400 });
-  }
+function isDuplicateReservationError(e: unknown): boolean {
+  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
+}
 
-  const totalPax = adultsCount + minorsCount;
+function canReuseReservationStatus(status: ReservationStatus) {
+  return status === ReservationStatus.EXPIRED || status === ReservationStatus.CANCELLED;
+}
 
+async function attemptCreateReservation(args: {
+  body: CreateReservationBody;
+  adultsCount: number;
+  minorsCount: number;
+  totalPax: number;
+  browserLanguage: LanguageCode | null;
+}) {
+  const { body, adultsCount, minorsCount, totalPax, browserLanguage } = args;
   const now = new Date();
-  const browserLanguage = detectBrowserLanguage(req);
 
-  try {
-    const result = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(
+    async (tx) => {
       const session = await tx.session.findUniqueOrThrow({
         where: { id: body.sessionId },
       });
 
-      // Reglas de negocio básicas
       if (session.isCancelled) {
         return { ok: false as const, status: 400, error: "Session is cancelled" };
       }
@@ -104,26 +104,25 @@ export async function POST(req: Request) {
         return { ok: false as const, status: 400, error: "Booking is closed for this session" };
       }
 
-      // Customer: email obligatorio -> upsert
       const customer = await tx.customer.upsert({
         where: { email: body.customerEmail },
         update: {
-          name: body.customerName,
+          name: body.customerName ?? undefined,
           phone: body.customerPhone ?? undefined,
         },
         create: {
-          name: body.customerName,
+          name: body.customerName ?? null,
           email: body.customerEmail,
           phone: body.customerPhone ?? null,
         },
       });
 
-      // Evitar duplicado (mismo email + misma sesión)
       const existing = await tx.reservation.findUnique({
         where: { sessionId_customerId: { sessionId: session.id, customerId: customer.id } },
+        include: { payment: true },
       });
 
-      if (existing) {
+      if (existing && !canReuseReservationStatus(existing.status)) {
         return {
           ok: false as const,
           status: 409,
@@ -131,12 +130,25 @@ export async function POST(req: Request) {
         };
       }
 
-      // =========================
-      // CAPACIDAD REAL (por pax)
-      // =========================
-      // reservedSeats = SUM(totalPax) de:
-      // - CONFIRMED
-      // - HOLD con holdExpiresAt > now
+      const reusableReservation = existing && canReuseReservationStatus(existing.status) ? existing : null;
+
+      const paymentData = session.requiresPayment
+        ? {
+            status: PaymentStatus.REQUIRES_PAYMENT,
+            amountCents:
+              adultsCount * session.adultPriceCents + minorsCount * session.minorPriceCents,
+            currency: session.currency,
+            stripeCheckoutSessionId: null,
+            stripePaymentIntentId: null,
+          }
+        : {
+            status: PaymentStatus.NOT_REQUIRED,
+            amountCents: 0,
+            currency: session.currency,
+            stripeCheckoutSessionId: null,
+            stripePaymentIntentId: null,
+          };
+
       const reservedAgg = await tx.reservation.aggregate({
         where: {
           sessionId: session.id,
@@ -151,50 +163,93 @@ export async function POST(req: Request) {
       const reservedSeats = reservedAgg._sum.totalPax ?? 0;
       const freeSeats = Math.max(0, session.maxSeatsTotal - reservedSeats);
 
-      // Si no cabe el grupo, pasamos a WAITING (lista de espera)
       if (freeSeats < totalPax) {
-        const waiting = await tx.reservation.create({
-          data: {
-            sessionId: session.id,
-            customerId: customer.id,
-            status: ReservationStatus.WAITING,
-            // Lo mantenemos por compat con tu flujo actual (más adelante puede ir en ventana 3)
-            tourLanguage: body.tourLanguage,
-            // Interno (puede ser null)
-            browserLanguage,
-            // Pax
-            adultsCount,
-            minorsCount,
-            totalPax,
-          },
-        });
+        const waiting = reusableReservation
+          ? await tx.reservation.update({
+              where: { id: reusableReservation.id },
+              data: {
+                guideUserId: null,
+                status: ReservationStatus.WAITING,
+                holdExpiresAt: null,
+                tourLanguage: body.tourLanguage ?? null,
+                browserLanguage,
+                adultsCount,
+                minorsCount,
+                totalPax,
+                cancelledAt: null,
+                cancelReason: null,
+                refundAmountCents: 0,
+                createdEmailSentAt: null,
+                createdEmailKind: null,
+              },
+            })
+          : await tx.reservation.create({
+              data: {
+                sessionId: session.id,
+                customerId: customer.id,
+                status: ReservationStatus.WAITING,
+                tourLanguage: body.tourLanguage ?? null,
+                browserLanguage,
+                adultsCount,
+                minorsCount,
+                totalPax,
+              },
+            });
+
+        if (reusableReservation?.payment) {
+          await tx.payment.update({
+            where: { id: reusableReservation.payment.id },
+            data: { status: PaymentStatus.CANCELED, stripeCheckoutSessionId: null, stripePaymentIntentId: null },
+          });
+        }
 
         return { ok: true as const, kind: "WAITING" as const, reservationId: waiting.id };
       }
 
-      // =========================
-      // ASIGNACIÓN DE GUÍA
-      // =========================
-      // - No filtramos por tourLanguage en guide.languages (todos dominan CA/ES/EN).
-      // - Solo usamos browserLanguage si es un idioma “extra” (DE/FR/IT...) para preferir guías especiales.
       const candidateGuides = await tx.user.findMany({
         where: { role: "GUIDE", isActive: true },
         select: { id: true, languages: true },
       });
 
       if (candidateGuides.length === 0) {
-        const waiting = await tx.reservation.create({
-          data: {
-            sessionId: session.id,
-            customerId: customer.id,
-            status: ReservationStatus.WAITING,
-            tourLanguage: body.tourLanguage,
-            browserLanguage,
-            adultsCount,
-            minorsCount,
-            totalPax,
-          },
-        });
+        const waiting = reusableReservation
+          ? await tx.reservation.update({
+              where: { id: reusableReservation.id },
+              data: {
+                guideUserId: null,
+                status: ReservationStatus.WAITING,
+                holdExpiresAt: null,
+                tourLanguage: body.tourLanguage ?? null,
+                browserLanguage,
+                adultsCount,
+                minorsCount,
+                totalPax,
+                cancelledAt: null,
+                cancelReason: null,
+                refundAmountCents: 0,
+                createdEmailSentAt: null,
+                createdEmailKind: null,
+              },
+            })
+          : await tx.reservation.create({
+              data: {
+                sessionId: session.id,
+                customerId: customer.id,
+                status: ReservationStatus.WAITING,
+                tourLanguage: body.tourLanguage ?? null,
+                browserLanguage,
+                adultsCount,
+                minorsCount,
+                totalPax,
+              },
+            });
+
+        if (reusableReservation?.payment) {
+          await tx.payment.update({
+            where: { id: reusableReservation.payment.id },
+            data: { status: PaymentStatus.CANCELED, stripeCheckoutSessionId: null, stripePaymentIntentId: null },
+          });
+        }
 
         return { ok: true as const, kind: "WAITING" as const, reservationId: waiting.id };
       }
@@ -207,7 +262,6 @@ export async function POST(req: Request) {
       async function pickLeastLoaded(guideIds: string[]): Promise<string | null> {
         if (guideIds.length === 0) return null;
 
-        // Carga por guía = SUM(totalPax) (CONFIRMED + HOLD activo)
         const loads = await tx.reservation.groupBy({
           by: ["guideUserId"],
           where: {
@@ -230,78 +284,104 @@ export async function POST(req: Request) {
           .map((id) => ({ id, load: loadMap.get(id) ?? 0 }))
           .sort((a, b) => a.load - b.load);
 
-        // Comprobamos que el guía tenga hueco suficiente para este grupo
         const chosen = sorted.find((g) => g.load + totalPax <= session.maxPerGuide);
         return chosen?.id ?? null;
       }
 
-      // 1º: guía “especial” (si aplica), 2º: cualquiera
       let guideUserId: string | null = await pickLeastLoaded(preferredGuides.map((g) => g.id));
       if (!guideUserId) {
         guideUserId = await pickLeastLoaded(candidateGuides.map((g) => g.id));
       }
 
       if (!guideUserId) {
-        // No hay guía con hueco -> WAITING
-        const waiting = await tx.reservation.create({
-          data: {
-            sessionId: session.id,
-            customerId: customer.id,
-            status: ReservationStatus.WAITING,
-            tourLanguage: body.tourLanguage,
-            browserLanguage,
-            adultsCount,
-            minorsCount,
-            totalPax,
-          },
-        });
+        const waiting = reusableReservation
+          ? await tx.reservation.update({
+              where: { id: reusableReservation.id },
+              data: {
+                guideUserId: null,
+                status: ReservationStatus.WAITING,
+                holdExpiresAt: null,
+                tourLanguage: body.tourLanguage ?? null,
+                browserLanguage,
+                adultsCount,
+                minorsCount,
+                totalPax,
+                cancelledAt: null,
+                cancelReason: null,
+                refundAmountCents: 0,
+                createdEmailSentAt: null,
+                createdEmailKind: null,
+              },
+            })
+          : await tx.reservation.create({
+              data: {
+                sessionId: session.id,
+                customerId: customer.id,
+                status: ReservationStatus.WAITING,
+                tourLanguage: body.tourLanguage ?? null,
+                browserLanguage,
+                adultsCount,
+                minorsCount,
+                totalPax,
+              },
+            });
+
+        if (reusableReservation?.payment) {
+          await tx.payment.update({
+            where: { id: reusableReservation.payment.id },
+            data: { status: PaymentStatus.CANCELED, stripeCheckoutSessionId: null, stripePaymentIntentId: null },
+          });
+        }
 
         return { ok: true as const, kind: "WAITING" as const, reservationId: waiting.id };
       }
 
-      // =========================
-      // HOLD (retención temporal)
-      // =========================
-      const holdExpiresAt = new Date(now.getTime() + (HOLD_MINUTES + 1) * 60 * 1000);
+      const holdExpiresAt = addMinutes(now, HOLD_MINUTES + 1);
 
-      const reservation = await tx.reservation.create({
-        data: {
-          sessionId: session.id,
-          customerId: customer.id,
-          guideUserId,
-          status: ReservationStatus.HOLD,
-          holdExpiresAt,
-          tourLanguage: body.tourLanguage,
-          browserLanguage,
-          adultsCount,
-          minorsCount,
-          totalPax,
-        },
-      });
+      const reservation = reusableReservation
+        ? await tx.reservation.update({
+            where: { id: reusableReservation.id },
+            data: {
+              guideUserId,
+              status: ReservationStatus.HOLD,
+              holdExpiresAt,
+              tourLanguage: body.tourLanguage ?? null,
+              browserLanguage,
+              adultsCount,
+              minorsCount,
+              totalPax,
+              cancelledAt: null,
+              cancelReason: null,
+              refundAmountCents: 0,
+              createdEmailSentAt: null,
+              createdEmailKind: null,
+            },
+          })
+        : await tx.reservation.create({
+            data: {
+              sessionId: session.id,
+              customerId: customer.id,
+              guideUserId,
+              status: ReservationStatus.HOLD,
+              holdExpiresAt,
+              tourLanguage: body.tourLanguage ?? null,
+              browserLanguage,
+              adultsCount,
+              minorsCount,
+              totalPax,
+            },
+          });
 
-      // =========================
-      // Payment placeholder (server-truth)
-      // =========================
-      // El total siempre se calcula desde DB usando pax + precios de la sesión.
-      const amountCents =
-        adultsCount * session.adultPriceCents + minorsCount * session.minorPriceCents;
-
-      if (session.requiresPayment) {
-        await tx.payment.create({
-          data: {
-            reservationId: reservation.id,
-            status: PaymentStatus.REQUIRES_PAYMENT,
-            amountCents,
-            currency: session.currency,
-          },
+      if (reusableReservation?.payment) {
+        await tx.payment.update({
+          where: { id: reusableReservation.payment.id },
+          data: paymentData,
         });
       } else {
         await tx.payment.create({
           data: {
             reservationId: reservation.id,
-            status: PaymentStatus.NOT_REQUIRED,
-            amountCents: 0,
-            currency: session.currency,
+            ...paymentData,
           },
         });
       }
@@ -312,7 +392,77 @@ export async function POST(req: Request) {
         reservationId: reservation.id,
         holdExpiresAt: madridFormatter.format(holdExpiresAt),
       };
-    });
+    },
+    { isolationLevel: "Serializable" },
+  );
+}
+
+export async function POST(req: Request) {
+  /**
+   * Mantenemos el type actual (CreateReservationBody), pero el body real incluye pax.
+   * Lo leemos desde "raw" para no bloquearte por tipos mientras ajustas los types del front.
+   */
+  const raw = (await req.json()) as Record<string, unknown>;
+  const body = raw as CreateReservationBody;
+
+  // Pax (nuevo flujo)
+  const adultsCount = toInt(raw.adultsCount);
+  const minorsCount = toInt(raw.minorsCount);
+
+  if (!body.sessionId || !body.customerEmail) {
+    return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+  }
+
+  // Validación de pax: adultos >= 1, menores >= 0
+  if (!Number.isFinite(adultsCount) || adultsCount < 1) {
+    return NextResponse.json({ error: "adultsCount must be a number >= 1" }, { status: 400 });
+  }
+  if (!Number.isFinite(minorsCount) || minorsCount < 0) {
+    return NextResponse.json({ error: "minorsCount must be a number >= 0" }, { status: 400 });
+  }
+
+  const totalPax = adultsCount + minorsCount;
+
+  const browserLanguage = detectBrowserLanguage(req);
+
+  try {
+    let result:
+      | (CreateReservationResponse & { ok: true; reservationId: string })
+      | { ok: false; status: number; error: string }
+      | null = null;
+
+    for (let i = 0; i < MAX_SERIALIZABLE_RETRIES; i++) {
+      try {
+        result = await attemptCreateReservation({
+          body,
+          adultsCount,
+          minorsCount,
+          totalPax,
+          browserLanguage,
+        });
+        break;
+      } catch (e: unknown) {
+        if (isSerializationError(e) && i < MAX_SERIALIZABLE_RETRIES - 1) {
+          continue;
+        }
+
+        if (isDuplicateReservationError(e)) {
+          return NextResponse.json(
+            { error: "Customer already has a reservation for this session" },
+            { status: 409 },
+          );
+        }
+
+        throw e;
+      }
+    }
+
+    if (!result) {
+      return NextResponse.json(
+        { error: "Could not create reservation due to concurrent updates" },
+        { status: 409 },
+      );
+    }
 
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
@@ -340,7 +490,7 @@ export async function POST(req: Request) {
           const startText = madridFormatter.format(fullReservation.session.startAt);
 
           // Compat: tu email de HOLD aún incluye idioma
-          const languageLabel = fullReservation.tourLanguage ?? body.tourLanguage;
+          const languageLabel = fullReservation.tourLanguage ?? body.tourLanguage ?? "Pendiente";
 
           // Idempotencia: solo 1 email "created" por reserva
           const mark = await prisma.reservation.updateMany({

@@ -30,10 +30,10 @@ export type WaitlistResponse =
 
 export type CreateHoldBody = {
     sessionId: string;
-    customerName: string;
     customerEmail: string;
+    customerName?: string;
     customerPhone?: string;
-    tourLanguage: LanguageBase;
+    tourLanguage?: LanguageBase;
     adultsCount: number;
     minorsCount: number;
 };
@@ -45,4 +45,30 @@ export type CreateHoldResponse =
 
 export type CheckoutResponse =
     | { ok: true; checkoutUrl: string; reused: boolean }
+    | { ok: false; error: string };
+
+export type ReleaseHoldBody = {
+    reservationId?: string;
+    checkoutSessionId?: string;
+};
+
+export type ReleaseHoldResponse =
+    | {
+        ok: true;
+        released: boolean;
+        reservationId: string;
+        reservationStatus: string;
+        paymentStatus: string | null;
+    }
+    | { ok: false; error: string };
+
+export type UpdateHoldBody = {
+    reservationId: string;
+    customerName: string;
+    customerPhone?: string;
+    tourLanguage: LanguageBase;
+};
+
+export type UpdateHoldResponse =
+    | { ok: true }
     | { ok: false; error: string };

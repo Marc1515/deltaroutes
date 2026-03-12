@@ -9,6 +9,8 @@ import {
   joinWaitlist,
   createHoldReservation,
   createCheckout,
+  releaseHoldReservation,
+  updateHoldReservation,
 } from "../api/booking.api";
 import type { LanguageBase } from "@/generated/prisma";
 
@@ -29,7 +31,8 @@ export function BookingModal(props: {
   experience: ExperienceCard | null;
   onClose: () => void;
 }) {
-  const [shouldRender, setShouldRender] = useState(props.open);
+  const { open, experience, onClose } = props;
+  const [shouldRender, setShouldRender] = useState(open);
   const [isVisible, setIsVisible] = useState(false);
   const [step, setStep] = useState<Step>(1);
 
@@ -39,10 +42,16 @@ export function BookingModal(props: {
   const [email, setEmail] = useState("");
 
   const pax = useMemo(() => adults + minors, [adults, minors]);
-  const experienceId = props.experience?.experienceId;
+  const experienceId = experience?.experienceId;
+  const isLiveRefreshingStep2 = shouldRender && step === 2;
 
   // Step 2
-  const { loading, error, sessions } = useSessions({ experienceId, pax });
+  const { loading, error, sessions, refreshSessions } = useSessions({
+    experienceId,
+    pax,
+    autoRefreshEnabled: isLiveRefreshingStep2,
+    refreshIntervalMs: 2000,
+  });
   const [selectedSession, setSelectedSession] =
     useState<SessionAvailability | null>(null);
 
@@ -54,6 +63,7 @@ export function BookingModal(props: {
   const [busy, setBusy] = useState(false);
   const [uiError, setUiError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [activeHoldId, setActiveHoldId] = useState<string | null>(null);
 
   const resetAll = useCallback(() => {
     setStep(1);
@@ -67,14 +77,111 @@ export function BookingModal(props: {
     setBusy(false);
     setUiError(null);
     setSuccessMsg(null);
+    setActiveHoldId(null);
   }, []);
 
-  function close() {
-    props.onClose();
-  }
+  const releaseTrackedHold = useCallback(async (reservationId: string) => {
+    const result = await releaseHoldReservation({ reservationId });
+
+    if (result.ok) {
+      setActiveHoldId(null);
+      await refreshSessions();
+    }
+
+    return result;
+  }, [refreshSessions]);
+
+  const startHoldForSession = useCallback(
+    async (session: SessionAvailability) => {
+      setBusy(true);
+      setUiError(null);
+      setSuccessMsg(null);
+
+      try {
+        const hold = await createHoldReservation({
+          sessionId: session.id,
+          customerEmail: email.trim(),
+          adultsCount: adults,
+          minorsCount: minors,
+        });
+
+        if (!hold.ok) {
+          setUiError(hold.error || "No se pudo bloquear la sesion");
+          return;
+        }
+
+        if (hold.kind !== "HOLD") {
+          setSuccessMsg(
+            "Mientras elegias la sesion se agotaron las plazas y te hemos puesto en lista de espera.",
+          );
+          return;
+        }
+
+        setActiveHoldId(hold.reservationId);
+        setSelectedSession(session);
+        await refreshSessions();
+        setStep(3);
+      } catch (e) {
+        setUiError(e instanceof Error ? e.message : "Error desconocido");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [adults, email, minors, refreshSessions],
+  );
+
+  const close = useCallback(async () => {
+    if (busy) return;
+
+    if (!activeHoldId) {
+      onClose();
+      return;
+    }
+
+    setBusy(true);
+    setUiError(null);
+
+    try {
+      const released = await releaseTrackedHold(activeHoldId);
+
+      if (!released.ok) {
+        setUiError(released.error || "No se pudo liberar la reserva");
+        return;
+      }
+
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }, [activeHoldId, busy, onClose, releaseTrackedHold]);
+
+  const goBackToSessions = useCallback(async () => {
+    if (busy) return;
+
+    if (!activeHoldId) {
+      setStep(2);
+      return;
+    }
+
+    setBusy(true);
+    setUiError(null);
+
+    try {
+      const released = await releaseTrackedHold(activeHoldId);
+
+      if (!released.ok) {
+        setUiError(released.error || "No se pudo liberar la reserva");
+        return;
+      }
+
+      setStep(2);
+    } finally {
+      setBusy(false);
+    }
+  }, [activeHoldId, busy, releaseTrackedHold]);
 
   useEffect(() => {
-    if (props.open) {
+    if (open) {
       setShouldRender(true);
       return;
     }
@@ -87,7 +194,7 @@ export function BookingModal(props: {
     }, MODAL_ANIMATION_MS);
 
     return () => window.clearTimeout(timeout);
-  }, [props.open, resetAll]);
+  }, [open, resetAll]);
 
   useEffect(() => {
     if (!shouldRender) return;
@@ -99,7 +206,7 @@ export function BookingModal(props: {
     }, 10);
 
     return () => window.clearTimeout(timeout);
-  }, [shouldRender, props.experience?.experienceId]);
+  }, [shouldRender, experience?.experienceId]);
 
   useEffect(() => {
     if (!shouldRender) return;
@@ -139,23 +246,24 @@ export function BookingModal(props: {
             <div className="pb-2">
               <div className="text-sm opacity-70">Reserva</div>
               <div className="text-lg font-semibold">
-                {props.experience?.title ?? "Experiencia"}
+                {experience?.title ?? "Experiencia"}
               </div>
             </div>
 
             <button
               onClick={close}
-              className="rounded-xl border px-3 py-1 text-sm"
+              disabled={busy}
+              className="rounded-xl border px-3 py-1 text-sm disabled:opacity-50"
             >
               Cerrar
             </button>
           </div>
 
-          {props.experience && (
+          {experience && (
             <div className="relative mb-5 h-48 overflow-hidden rounded-2xl">
               <Image
-                src={props.experience.imageSrc}
-                alt={props.experience.imageAlt}
+                src={experience.imageSrc}
+                alt={experience.imageAlt}
                 fill
                 className="object-cover"
                 sizes="(max-width: 768px) 100vw, 672px"
@@ -243,6 +351,9 @@ export function BookingModal(props: {
               <div className="text-sm opacity-80">
                 Plazas solicitadas: <span className="font-semibold">{pax}</span>
               </div>
+              <div className="text-xs opacity-60">
+                Disponibilidad actualizada automaticamente cada 2 segundos.
+              </div>
 
               {loading && <div className="text-sm">Cargando sesiones…</div>}
               {error && <div className="text-sm text-red-700">{error}</div>}
@@ -273,13 +384,9 @@ export function BookingModal(props: {
 
                       {s.canFit ? (
                         <button
-                          className="rounded-xl bg-black px-3 py-2 text-sm text-white"
-                          onClick={() => {
-                            setUiError(null);
-                            setSuccessMsg(null);
-                            setSelectedSession(s);
-                            setStep(3);
-                          }}
+                          className="rounded-xl bg-black px-3 py-2 text-sm text-white disabled:opacity-50"
+                          disabled={busy || !email.trim()}
+                          onClick={() => void startHoldForSession(s)}
                         >
                           Reservar ahora
                         </button>
@@ -332,12 +439,14 @@ export function BookingModal(props: {
                 <button
                   className="rounded-xl border px-4 py-2 text-sm"
                   onClick={() => setStep(1)}
+                  disabled={busy}
                 >
                   Atrás
                 </button>
                 <button
-                  className="rounded-xl border px-4 py-2 text-sm"
+                  className="rounded-xl border px-4 py-2 text-sm disabled:opacity-50"
                   onClick={close}
+                  disabled={busy}
                 >
                   Cerrar
                 </button>
@@ -393,7 +502,7 @@ export function BookingModal(props: {
               <div className="flex justify-between">
                 <button
                   className="rounded-xl border px-4 py-2 text-sm"
-                  onClick={() => setStep(2)}
+                  onClick={goBackToSessions}
                   disabled={busy}
                 >
                   Atrás
@@ -406,45 +515,62 @@ export function BookingModal(props: {
                     setBusy(true);
                     setUiError(null);
                     setSuccessMsg(null);
+                    const holdReservationId = activeHoldId;
+
+                    if (!holdReservationId) {
+                      setUiError(
+                        "La retencion ya no esta activa. Vuelve a elegir la sesion.",
+                      );
+                      setBusy(false);
+                      return;
+                    }
 
                     try {
-                      const hold = await createHoldReservation({
-                        sessionId: selectedSession.id,
-                        customerEmail: email.trim(),
+                      const updatedHold = await updateHoldReservation({
+                        reservationId: holdReservationId,
                         customerName: fullName.trim(),
                         customerPhone: phone.trim() ? phone.trim() : undefined,
                         tourLanguage,
-                        adultsCount: adults,
-                        minorsCount: minors,
                       });
 
-                      if (!hold.ok) {
-                        setUiError(hold.error || "No se pudo crear la reserva");
-                        return;
-                      }
-
-                      if (hold.kind !== "HOLD") {
-                        // Si por lo que sea pasó a WAITING, lo comunicamos
-                        setSuccessMsg(
-                          "No había plazas suficientes. Te hemos puesto en lista de espera.",
+                      if (!updatedHold.ok) {
+                        setUiError(
+                          updatedHold.error ||
+                            "No se pudieron guardar los datos de la reserva",
                         );
                         return;
                       }
 
                       // Crear checkout de Stripe y redirigir
                       const checkout = await createCheckout({
-                        reservationId: hold.reservationId,
+                        reservationId: holdReservationId,
                       });
 
                       if (!checkout.ok) {
-                        setUiError(
-                          checkout.error || "No se pudo iniciar el pago",
-                        );
+                        const releaseResult = await releaseTrackedHold(holdReservationId);
+                        if (!releaseResult.ok) {
+                          setUiError(
+                            "No se pudo iniciar el pago y tampoco liberar la retencion. Se liberara automaticamente al expirar.",
+                          );
+                          return;
+                        }
+
+                        setUiError(checkout.error || "No se pudo iniciar el pago");
                         return;
                       }
 
                       window.location.href = checkout.checkoutUrl;
                     } catch (e) {
+                      if (holdReservationId) {
+                        const releaseResult = await releaseTrackedHold(holdReservationId);
+                        if (!releaseResult.ok) {
+                          setUiError(
+                            "Se produjo un error y la retencion sigue activa unos minutos.",
+                          );
+                          return;
+                        }
+                      }
+
                       setUiError(
                         e instanceof Error ? e.message : "Error desconocido",
                       );

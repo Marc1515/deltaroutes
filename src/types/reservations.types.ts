@@ -4,10 +4,10 @@ import type { LanguageBase } from "@/generated/prisma";
 /** Request body para POST /api/reservations */
 export type CreateReservationBody = {
     sessionId: string;
-    customerName: string;
     customerEmail: string; // obligatorio
+    customerName?: string;
     customerPhone?: string;
-    tourLanguage: LanguageBase; // CA | ES | EN
+    tourLanguage?: LanguageBase; // CA | ES | EN
 };
 
 /** Respuesta del endpoint (útil para tipar frontend) */

@@ -5,6 +5,10 @@ import type {
     CreateHoldBody,
     CreateHoldResponse,
     CheckoutResponse,
+    ReleaseHoldBody,
+    ReleaseHoldResponse,
+    UpdateHoldBody,
+    UpdateHoldResponse,
 } from "../types/booking.types";
 
 async function safeJson<T>(res: Response): Promise<T> {
@@ -43,4 +47,22 @@ export async function createCheckout(args: { reservationId: string }) {
         body: JSON.stringify(args),
     });
     return safeJson<CheckoutResponse>(res);
+}
+
+export async function releaseHoldReservation(body: ReleaseHoldBody) {
+    const res = await fetch(`/api/reservations/release`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+    return safeJson<ReleaseHoldResponse>(res);
+}
+
+export async function updateHoldReservation(body: UpdateHoldBody) {
+    const res = await fetch(`/api/reservations/hold/update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+    return safeJson<UpdateHoldResponse>(res);
 }
