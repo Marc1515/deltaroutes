@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: deltaroutes
       POSTGRES_USER: deltaroutes_user
-      POSTGRES_PASSWORD: CAMBIA_ESTA_PASSWORD
+      POSTGRES_PASSWORD: delta7465834754routes
     volumes:
       - deltaroutes_postgres_data:/var/lib/postgresql/data
     networks:
@@ -31,7 +31,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://deltaroutes_user:CAMBIA_ESTA_PASSWORD@deltaroutes-db:5432/deltaroutes
+      DATABASE_URL: postgresql://deltaroutes_user:delta7465834754routes@deltaroutes-db:5432/deltaroutes
     networks:
       - deltaroutes-internal
       - traefik-proxy
