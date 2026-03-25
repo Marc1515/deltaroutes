@@ -12,6 +12,7 @@ COPY . .
 
 ENV NODE_ENV=production
 ENV DATABASE_URL=postgresql://deltaroutes_user:dummy_password@deltaroutes-db:5432/deltaroutes
+ENV SHADOW_DATABASE_URL=postgresql://deltaroutes_user:dummy_password@deltaroutes-db:5432/deltaroutes_shadow
 
 RUN npx prisma generate --schema=./prisma/schema.prisma
 RUN npm run build
