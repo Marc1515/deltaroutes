@@ -11,6 +11,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 ENV NODE_ENV=production
+ENV DATABASE_URL=postgresql://deltaroutes_user:dummy_password@deltaroutes-db:5432/deltaroutes
 
 RUN npx prisma generate --schema=./prisma/schema.prisma
 RUN npm run build
