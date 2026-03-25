@@ -3,7 +3,7 @@ import { prisma } from "../../src/lib/prisma";
 
 async function main() {
     const sessions = await prisma.session.findMany({
-        take: 100,
+        take: 20,
         orderBy: { startAt: "asc" },
         include: { experience: { select: { title: true, type: true } } },
     });
@@ -17,7 +17,8 @@ async function main() {
             bookingClosesAt: s.bookingClosesAt.toISOString(),
             maxSeatsTotal: s.maxSeatsTotal,
             maxPerGuide: s.maxPerGuide,
-            priceCents: s.priceCents,
+            adultPriceCents: s.adultPriceCents,
+            minorPriceCents: s.minorPriceCents,
             requiresPayment: s.requiresPayment,
             currency: s.currency,
             cancelled: s.isCancelled,
