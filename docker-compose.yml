@@ -41,6 +41,7 @@ services:
       - "traefik.http.routers.deltaroutes.rule=Host(`deltaroutes.marcespana.com`)"
       - "traefik.http.routers.deltaroutes.entrypoints=websecure"
       - "traefik.http.routers.deltaroutes.tls=true"
+      - "traefik.http.routers.deltaroutes.tls.certresolver=letsencrypt"
       - "traefik.http.services.deltaroutes.loadbalancer.server.port=3000"
       - "traefik.docker.network=traefik-proxy"
 
