@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { render } from "@react-email/render";
-import { resend } from "@/lib/resend";
+import { getResendClient } from "@/lib/resend";
 
 type SendEmailArgs = {
     to: string;
@@ -12,7 +12,8 @@ type SendEmailArgs = {
 export async function sendEmail({ to, subject, react, replyTo }: SendEmailArgs) {
     const from = process.env.EMAIL_FROM;
     if (!from) throw new Error("Missing EMAIL_FROM env var");
-    if (!process.env.RESEND_API_KEY) throw new Error("Missing RESEND_API_KEY env var");
+
+    const resend = getResendClient();
 
     const html = await render(react);
     const text = await render(react, { plainText: true });
