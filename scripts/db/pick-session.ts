@@ -32,8 +32,10 @@ async function main() {
         bookingClosesAt: session.bookingClosesAt.toISOString(),
         maxSeatsTotal: session.maxSeatsTotal,
         maxPerGuide: session.maxPerGuide,
-        priceCents: session.priceCents,
+        adultPriceCents: session.adultPriceCents,
+        minorPriceCents: session.minorPriceCents,
         requiresPayment: session.requiresPayment,
+        currency: session.currency,
     });
 }
 
