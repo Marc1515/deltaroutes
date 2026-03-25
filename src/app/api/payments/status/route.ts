@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { stripe } from "@/lib/stripe";
+import { getStripeClient } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { ReservationStatus, PaymentStatus } from "@/generated/prisma";
 import { sendEmail } from "@/lib/email";
@@ -68,7 +68,7 @@ export async function GET(req: Request) {
     // Si DB dice HOLD + pending, consultamos Stripe y, si está paid, confirmamos nosotros.
     if (reservation.status === ReservationStatus.HOLD && isPendingPaymentStatus(payment.status)) {
         try {
-            const session = await stripe.checkout.sessions.retrieve(sessionId);
+            const session = await getStripeClient().checkout.sessions.retrieve(sessionId);
 
             // Stripe aún no lo marca pagado
             if (session.payment_status !== "paid") {

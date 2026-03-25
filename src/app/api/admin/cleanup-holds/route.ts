@@ -2,7 +2,7 @@ import "dotenv/config";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { ReservationStatus, PaymentStatus } from "@/generated/prisma";
-import { stripe } from "@/lib/stripe";
+import { getStripeClient } from "@/lib/stripe";
 
 export const runtime = "nodejs";
 
@@ -65,7 +65,7 @@ export async function POST() {
 
         for (const sessionId of stripeSessionIds) {
             try {
-                await stripe.checkout.sessions.expire(sessionId);
+                await getStripeClient().checkout.sessions.expire(sessionId);
                 stripeResults.push({ sessionId, ok: true });
             } catch (e: unknown) {
                 const msg = e instanceof Error ? e.message : "Unknown Stripe error";

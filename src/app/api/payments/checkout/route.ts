@@ -2,7 +2,7 @@
 import "dotenv/config";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { stripe } from "@/lib/stripe";
+import { getStripeClient } from "@/lib/stripe";
 import { PaymentStatus, ReservationStatus } from "@/generated/prisma";
 import Stripe from "stripe";
 
@@ -90,7 +90,7 @@ export async function POST(req: Request) {
     // Si ya tenemos un checkoutSessionId, intentamos reutilizarlo.
     if (reservation.payment.stripeCheckoutSessionId) {
         try {
-            const existing = await stripe.checkout.sessions.retrieve(
+            const existing = await getStripeClient().checkout.sessions.retrieve(
                 reservation.payment.stripeCheckoutSessionId
             );
 
@@ -157,7 +157,7 @@ export async function POST(req: Request) {
     let session: Stripe.Checkout.Session;
 
     try {
-        session = await stripe.checkout.sessions.create(
+        session = await getStripeClient().checkout.sessions.create(
             {
                 mode: "payment",
 
