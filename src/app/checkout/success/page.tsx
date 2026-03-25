@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 type OkFound = {
@@ -29,7 +29,7 @@ function isOkFound(x: StatusResponse): x is OkFound {
 
 type UiState = "loading" | "confirmed" | "not_found" | "error";
 
-export default function SuccessPage() {
+function SuccessPageClient() {
   const sp = useSearchParams();
   const sessionId = sp.get("session_id"); // ✅ aquí sí lo pillas siempre
 
@@ -145,5 +145,22 @@ export default function SuccessPage() {
         </div>
       )}
     </main>
+  );
+}
+
+export default function SuccessPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="p-6 max-w-xl">
+          <h1 className="text-2xl font-semibold">✅ Pago completado</h1>
+          <p className="mt-2 text-gray-700">
+            Estamos confirmando tu reserva… (puede tardar unos segundos)
+          </p>
+        </main>
+      }
+    >
+      <SuccessPageClient />
+    </Suspense>
   );
 }
