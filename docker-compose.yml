@@ -1,21 +1,53 @@
 services:
-  db:
+  deltaroutes-db:
     image: postgres:16-alpine
-    container_name: deltaroutes_db
+    container_name: deltaroutes-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
       POSTGRES_DB: deltaroutes
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: deltaroutes_user
+      POSTGRES_PASSWORD: CAMBIA_ESTA_PASSWORD
     volumes:
-      - deltaroutes_pgdata:/var/lib/postgresql/data
+      - deltaroutes_postgres_data:/var/lib/postgresql/data
+    networks:
+      - deltaroutes-internal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d deltaroutes"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U deltaroutes_user -d deltaroutes"]
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 5
+
+  deltaroutes-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: deltaroutes-app
+    restart: unless-stopped
+    depends_on:
+      deltaroutes-db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://deltaroutes_user:CAMBIA_ESTA_PASSWORD@deltaroutes-db:5432/deltaroutes
+    networks:
+      - deltaroutes-internal
+      - traefik-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.deltaroutes.rule=Host(`deltaroutes.marcespana.com`)"
+      - "traefik.http.routers.deltaroutes.entrypoints=websecure"
+      - "traefik.http.routers.deltaroutes.tls=true"
+      - "traefik.http.services.deltaroutes.loadbalancer.server.port=3000"
+      - "traefik.docker.network=traefik-proxy"
 
 volumes:
-  deltaroutes_pgdata:
+  deltaroutes_postgres_data:
+
+networks:
+  deltaroutes-internal:
+    driver: bridge
+  traefik-proxy:
+    external: true
