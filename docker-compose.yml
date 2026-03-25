@@ -32,6 +32,7 @@ services:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://deltaroutes_user:delta7465834754routes@deltaroutes-db:5432/deltaroutes
+      SHADOW_DATABASE_URL: postgresql://deltaroutes_user:delta7465834754routes@deltaroutes-db:5432/deltaroutes_shadow
     networks:
       - deltaroutes-internal
       - traefik-proxy
