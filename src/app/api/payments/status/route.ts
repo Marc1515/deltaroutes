@@ -153,10 +153,10 @@ export async function GET(req: Request) {
                         ? `Experiencia ${reservation.session.experienceId.slice(0, 8).toUpperCase()}`
                         : `Sesión ${reservation.sessionId.slice(0, 8).toUpperCase()}`;
 
-                    // Usa el campo real de inicio del tour (aquí tú ya usabas startAt)
+                    // Usa el campo real de inicio del tour
                     const startText = madridFormatter.format(reservation.session.startAt);
 
-                    const languageLabel = reservation.tourLanguage;
+                    const languageLabel = reservation.tourLanguage ?? "No especificado";
                     const amountText = `${(payment.amountCents / 100).toFixed(2)} ${payment.currency.toUpperCase()}`;
 
                     void sendEmail({
