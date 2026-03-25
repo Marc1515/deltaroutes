@@ -73,10 +73,8 @@ export async function POST(req: NextRequest) {
                     return NextResponse.json({ ok: true, ignored: "not_paid" });
                 }
 
-                // 1) Intentamos por metadata (ideal)
                 const reservationId = getMetadataValue(session, "reservationId");
 
-                // 2) Fallback por stripeCheckoutSessionId (por si metadata faltase)
                 const reservation = reservationId
                     ? await prisma.reservation.findUnique({
                         where: { id: reservationId },
@@ -96,12 +94,10 @@ export async function POST(req: NextRequest) {
 
                 const payment = reservation.payment;
 
-                // Idempotencia: si ya está confirmado/pagado, no hacemos nada
                 if (reservation.status === ReservationStatus.CONFIRMED && payment.status === PaymentStatus.SUCCEEDED) {
                     return NextResponse.json({ ok: true, alreadyConfirmed: true });
                 }
 
-                // No revivir reservas
                 if (reservation.status !== ReservationStatus.HOLD) {
                     return NextResponse.json({ ok: true, ignored: "reservation_not_hold", status: reservation.status });
                 }
@@ -116,7 +112,6 @@ export async function POST(req: NextRequest) {
                 const stripeAmount = session.amount_total;
                 const stripeCurrency = session.currency.toLowerCase();
 
-                // Validación fuerte (mantengo tu regla)
                 if (stripeAmount !== payment.amountCents || stripeCurrency !== payment.currency.toLowerCase()) {
                     throw new Error(
                         `Amount/currency mismatch. stripe=${stripeAmount} ${stripeCurrency} db=${payment.amountCents} ${payment.currency}`
@@ -146,7 +141,6 @@ export async function POST(req: NextRequest) {
 
                 console.log("[stripe-webhook] CONFIRMED:", reservation.id);
 
-                // Email idempotente (NO bloquear webhook)
                 try {
                     const mark = await prisma.reservation.updateMany({
                         where: { id: reservation.id, confirmedEmailSentAt: { equals: null } },
@@ -157,10 +151,8 @@ export async function POST(req: NextRequest) {
                         const reservationCode = `DR-${reservation.id.slice(0, 8).toUpperCase()}`;
                         const activityLabel = `Sesión ${reservation.sessionId.slice(0, 8).toUpperCase()}`;
 
-                        // Usa el campo real de inicio del tour
                         const startText = madridFormatter.format(reservation.session.startAt);
-
-                        const languageLabel = reservation.tourLanguage;
+                        const languageLabel = reservation.tourLanguage ?? "No especificado";
                         const amountText = `${(payment.amountCents / 100).toFixed(2)} ${payment.currency.toUpperCase()}`;
 
                         void sendEmail({
@@ -237,7 +229,6 @@ export async function POST(req: NextRequest) {
         const msg = err instanceof Error ? err.message : "Webhook error";
         console.error("[stripe-webhook] ERROR:", msg);
 
-        // 500 para que Stripe reintente si fue fallo real
         return NextResponse.json({ ok: false, error: msg }, { status: 500 });
     }
 }
