@@ -92,13 +92,13 @@ export function HomeSection() {
     >
       <div className="flex min-h-screen w-full flex-col justify-between px-4 pt-20 pb-10 text-center">
         <h1
-          className="sticky top-20 text-3xl font-semibold text-white drop-shadow transition-opacity duration-300"
+          className="sticky top-20 text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-semibold text-white drop-shadow transition-opacity duration-300"
           style={{ opacity: homeTitleOpacity }}
         >
           DeltaRoutes
         </h1>
         <p
-          className="sticky top-15 mt-2 text-white drop-shadow transition-opacity duration-100"
+          className="sticky top-15 mt-2 text-lg md:text-xl lg:text-2xl xl:text-3xl text-white drop-shadow transition-opacity duration-100"
           style={{ opacity: titleFirstParagraphOpacity }}
         >
           Explora rutas únicas por el Delta del Ebro y reserva experiencias
@@ -106,7 +106,7 @@ export function HomeSection() {
         </p>
 
         <p
-          className="sticky top-15 opacity-90 text-white drop-shadow transition-opacity duration-300"
+          className="sticky top-15 opacity-90 text-lg md:text-xl lg:text-2xl xl:text-3xl text-white drop-shadow transition-opacity duration-300"
           style={{ opacity: secondParagraphOpacity }}
         >
           Crea recuerdos inolvidables explorando los rincones más especiales
