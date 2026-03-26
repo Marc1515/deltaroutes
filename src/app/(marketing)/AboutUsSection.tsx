@@ -70,16 +70,14 @@ export function AboutUsSection() {
       <div
         ref={firstPanelRef}
         id="about-us"
-        className="relative mx-auto min-h-screen w-full max-w-5xl bg-cover bg-center bg-no-repeat px-4 py-10 text-white md:bg-fixed"
-        style={{ backgroundImage: 'url("/img/aboutUs4.png")' }}
+        className="relative min-h-screen w-full bg-cover bg-center bg-no-repeat py-10 text-white md:bg-fixed"
+        style={{ backgroundImage: 'url("/img/aboutUs7.png")' }}
       >
         <div
           className="pointer-events-none absolute inset-0 bg-black/80 transition-opacity duration-500"
           style={{ opacity: isIntroOverlayVisible ? 1 : 0 }}
         />
-        <div
-          className="sticky top-10 z-10"
-        >
+        <div className="sticky top-10 z-10 mx-auto w-full max-w-5xl px-4">
           <h2
             className="mb-8 text-2xl font-semibold transition-opacity duration-500"
             style={{
@@ -121,7 +119,7 @@ export function AboutUsSection() {
       </div>
       <div
         ref={secondPanelRef}
-        className="sticky top-0 z-0 mx-auto min-h-screen w-full max-w-5xl bg-cover bg-center bg-no-repeat px-4 py-10 text-white"
+        className="sticky top-0 z-0 min-h-screen w-full bg-cover bg-center bg-no-repeat py-10 text-white"
         style={{
           backgroundImage: 'url("/img/aboutUs5.jpeg")',
           backgroundPosition: "44.5% center",
@@ -131,9 +129,7 @@ export function AboutUsSection() {
           className="pointer-events-none absolute inset-0 bg-black/80 transition-opacity duration-500"
           style={{ opacity: isSecondOverlayVisible ? 1 : 0 }}
         />
-        <div
-          className="sticky top-0 z-10"
-        >
+        <div className="sticky top-0 z-10 mx-auto w-full max-w-5xl px-4">
           <p
             className="sticky top-10 mt-3 transition-all duration-500"
             style={{

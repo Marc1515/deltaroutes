@@ -87,7 +87,7 @@ export function HomeSection() {
     <section
       id="home"
       className="min-h-screen w-full bg-cover bg-center bg-fixed bg-no-repeat"
-      style={{ backgroundImage: 'url("/img/home.jpg")' }}
+      style={{ backgroundImage: 'url("/img/home.png")' }}
       aria-label="Inicio"
     >
       <div className="flex min-h-screen w-full flex-col justify-between px-4 pt-20 pb-10 text-center">
