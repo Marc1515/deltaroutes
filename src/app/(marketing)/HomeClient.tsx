@@ -19,9 +19,7 @@ export function HomeClient() {
   const contactTriggerRef = useRef<HTMLDivElement | null>(null);
 
   const [isIntroVisible, setIsIntroVisible] = useState(false);
-  const [isIntroOverlayVisible, setIsIntroOverlayVisible] = useState(false);
   const [isSecondTextVisible, setIsSecondTextVisible] = useState(false);
-  const [isSecondOverlayVisible, setIsSecondOverlayVisible] = useState(false);
 
   useEffect(() => {
     const firstPanel = firstPanelRef.current;
@@ -49,10 +47,6 @@ export function HomeClient() {
         currentScroll >= firstPanelTop - earlyRevealOffset &&
           currentScroll < secondPanelTop - earlyHideOffset,
       );
-      setIsIntroOverlayVisible(
-        currentScroll >= firstPanelTop - earlyRevealOffset &&
-          currentScroll < secondPanelTop,
-      );
 
       // El texto aparece un poco antes de que el segundo panel toque arriba
       // y desaparece un poco antes de que Contact entre en el viewport.
@@ -60,10 +54,6 @@ export function HomeClient() {
         secondPanelRect.top <= secondTextRevealOffset &&
           secondPanelRect.bottom > 0 &&
           contactTriggerRect.top > secondTextHideOffset,
-      );
-      setIsSecondOverlayVisible(
-        secondPanelRect.top <= secondTextRevealOffset &&
-          secondPanelRect.bottom > 0,
       );
     };
 
@@ -89,12 +79,10 @@ export function HomeClient() {
         <Banner1
           panelRef={firstPanelRef}
           isIntroVisible={isIntroVisible}
-          isIntroOverlayVisible={isIntroOverlayVisible}
         />
         <AboutUsSection />
         <Banner2
           panelRef={secondPanelRef}
-          isSecondOverlayVisible={isSecondOverlayVisible}
           isSecondTextVisible={isSecondTextVisible}
         />
         <div ref={contactTriggerRef}>

@@ -5,11 +5,9 @@ import { RefObject } from "react";
 export function Banner1({
   panelRef,
   isIntroVisible,
-  isIntroOverlayVisible,
 }: {
   panelRef: RefObject<HTMLDivElement | null>;
   isIntroVisible: boolean;
-  isIntroOverlayVisible: boolean;
 }) {
   return (
     <div
@@ -19,8 +17,7 @@ export function Banner1({
       style={{ backgroundImage: 'url("/img/aboutUs7.png")' }}
     >
       <div
-        className="pointer-events-none absolute inset-0 bg-black/80 transition-opacity duration-500"
-        style={{ opacity: isIntroOverlayVisible ? 1 : 0 }}
+        className="pointer-events-none absolute inset-0 bg-black/80"
       />
       <div className="sticky top-10 z-10 mx-auto w-full max-w-5xl px-4">
         <h2

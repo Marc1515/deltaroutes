@@ -4,11 +4,9 @@ import { RefObject } from "react";
 
 export function Banner2({
   panelRef,
-  isSecondOverlayVisible,
   isSecondTextVisible,
 }: {
   panelRef: RefObject<HTMLDivElement | null>;
-  isSecondOverlayVisible: boolean;
   isSecondTextVisible: boolean;
 }) {
   return (
@@ -21,8 +19,7 @@ export function Banner2({
       }}
     >
       <div
-        className="pointer-events-none absolute inset-0 bg-black/80 transition-opacity duration-500"
-        style={{ opacity: isSecondOverlayVisible ? 1 : 0 }}
+        className="pointer-events-none absolute inset-0 bg-black/80"
       />
       <div className="sticky top-0 z-10 mx-auto w-full max-w-5xl px-4">
         <p
