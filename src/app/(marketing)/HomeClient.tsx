@@ -34,11 +34,11 @@ export function HomeClient() {
       const firstPanelTop = firstPanel.offsetTop;
       const secondPanelTop = secondPanel.offsetTop;
       const currentScroll = window.scrollY;
-      const earlyRevealOffset = window.innerHeight * 0.15;
+      const earlyRevealOffset = window.innerHeight * 0.75;
       const earlyHideOffset = window.innerHeight * 0.35;
       const secondPanelRect = secondPanel.getBoundingClientRect();
       const contactTriggerRect = contactTrigger.getBoundingClientRect();
-      const secondTextRevealOffset = window.innerHeight * 0.15;
+      const secondTextRevealOffset = window.innerHeight * 0.75;
       const secondTextHideOffset = window.innerHeight * 0.35;
 
       // Visible un poco antes de que aboutUs3 ocupe completamente el viewport
@@ -75,11 +75,11 @@ export function HomeClient() {
         }}
       />
 
-      <section className="min-h-screen w-full bg-black" aria-label="Sobre DeltaRoutes">
-        <Banner1
-          panelRef={firstPanelRef}
-          isIntroVisible={isIntroVisible}
-        />
+      <section
+        className="min-h-screen w-full bg-black"
+        aria-label="Sobre DeltaRoutes"
+      >
+        <Banner1 panelRef={firstPanelRef} isIntroVisible={isIntroVisible} />
         <AboutUsSection />
         <Banner2
           panelRef={secondPanelRef}
