@@ -12,11 +12,11 @@ export function ExperiencesSection({
 }: ExperiencesSectionProps) {
   return (
     <section
-      className="min-h-screen w-full bg-black text-white"
+      className="min-h-screen w-full bg-black text-white md:flex md:flex-col md:justify-center"
       id="experiences"
       aria-label="Experiencias disponibles"
     >
-      <div className="mx-auto max-w-5xl px-4 py-10">
+      <div className="mx-auto max-w-5xl px-4 py-10 md:py-0">
         <h2 className="text-2xl font-semibold">Experiencias</h2>
         <p className="mt-2 opacity-80">
           Elige una de nuestras experiencias cuidadosamente diseñadas para
