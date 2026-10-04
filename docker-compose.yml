@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: deltaroutes
       POSTGRES_USER: deltaroutes_user
-      POSTGRES_PASSWORD: delta7465834754routes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - deltaroutes_postgres_data:/var/lib/postgresql/data
     networks:
@@ -23,6 +23,10 @@ services:
       dockerfile: Dockerfile
     container_name: deltaroutes-app
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       deltaroutes-db:
         condition: service_healthy
@@ -31,8 +35,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://deltaroutes_user:delta7465834754routes@deltaroutes-db:5432/deltaroutes
-      SHADOW_DATABASE_URL: postgresql://deltaroutes_user:delta7465834754routes@deltaroutes-db:5432/deltaroutes_shadow
+      DATABASE_URL: ${DATABASE_URL}
+      SHADOW_DATABASE_URL: ${SHADOW_DATABASE_URL}
     networks:
       - deltaroutes-internal
       - traefik-proxy
